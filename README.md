@@ -8,11 +8,12 @@ while **measuring and honestly reporting its own response time**, rather than pr
 breath-by-breath capnograph.
 
 ## Members (fill in names)
-- Member 1
-- Member 2
-- Member 3
-- Member 4
-- Member 5
+- Member 1: Abdelaziz Mourad
+- Member 2: Nyah Woller-li
+- Member 3: Szirina Ismail
+- Member 4: Alice She
+- Member 5: Michele Frederike 
+- Member 6: Yuhan Zhang
 
 ## Directory structure
 ```
