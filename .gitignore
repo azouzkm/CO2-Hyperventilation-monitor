@@ -1,0 +1,17 @@
+# Python
+__pycache__/
+*.pyc
+.venv/
+venv/
+
+# 本地数据库（不进版本管理）
+*.sqlite
+*.db
+
+# 大文件证据（照片视频数据放 Evidence，靠 ZIP 交，不靠 git）
+Evidence/**/*.mp4
+Evidence/**/*.xlsx
+
+# 系统
+.DS_Store
+Thumbs.db

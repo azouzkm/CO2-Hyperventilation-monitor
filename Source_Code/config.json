@@ -1,0 +1,19 @@
+{
+  "_comment": "Threshold config shared by the firmware and the service. Both read the same file so the device and the dashboard can never disagree about what counts as an alarm (stressed in the worked example's Marker's note). Values are placeholders — fill in real values after calibration.",
+
+  "sample_interval_s": 0.2,
+  "sample_rate_hz": 5.0,
+
+  "co2_unit": "percent",
+  "co2_normal_min_pct": 3.0,
+  "co2_absent_pct": 0.1,
+
+  "advisory_fall_pct": 2.0,
+  "advisory_return_to_range_s": 30.0,
+
+  "breathing_rate_normal_min_bpm": 8,
+  "breathing_rate_fall_bpm": 6,
+
+  "critical_latched": true,
+  "technical_timeout_s": 10.0
+}

@@ -1,0 +1,6 @@
+fastapi
+uvicorn
+pyserial
+pandas
+numpy
+matplotlib
