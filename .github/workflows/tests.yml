@@ -1,0 +1,32 @@
+# Runs the laptop-side tests on every pull request and on every push to main.
+# Results appear in the Actions tab, next to each pull request, and in the README badge.
+name: tests
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  pytest:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.11"   # the version listed on the project card
+
+      - name: Install pytest
+        run: python -m pip install pytest
+
+      - name: Run the tests (several replay the real 22 Oct bench readings)
+        run: python -m pytest -v tests/
+
+      - name: Check that every Python file compiles
+        run: python -m compileall -q firmware service tools tests hardware archive
