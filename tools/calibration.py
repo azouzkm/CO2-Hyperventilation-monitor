@@ -32,7 +32,7 @@ def response_time_10_90(t, signal):
     return float(t90 - t10)
 
 
-def plot_calibration(x, y, m, b, out="Evidence/Calibration_Data/calibration.png"):
+def plot_calibration(x, y, m, b, out="data/calibration/calibration.png"):
     """Plot the calibration scatter + fitted line + residuals, saved as an evidence image."""
     plt.scatter(x, y, label="data")
     plt.plot(x, m * np.asarray(x) + b, label="fit", color="tab:orange")

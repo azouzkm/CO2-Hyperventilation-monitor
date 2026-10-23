@@ -3,15 +3,37 @@ __pycache__/
 *.pyc
 .venv/
 venv/
+.pytest_cache/
 
-# 本地数据库（不进版本管理）
+# Local databases the service creates when it runs (not version-controlled)
 *.sqlite
+*.sqlite3
 *.db
+*.sqlite-wal
+*.sqlite-shm
+*.db-wal
+*.db-shm
 
-# 大文件证据（照片视频数据放 Evidence，靠 ZIP 交，不靠 git）
-Evidence/**/*.mp4
-Evidence/**/*.xlsx
+# Secrets: messaging API keys, Wi-Fi passwords. Never commit them.
+.env
+*.secret
+settings.toml
 
-# 系统
+# Large files: videos go in the submission ZIP, data goes in as CSV, photos as JPEG
+*.mp4
+*.mov
+*.MOV
+*.xlsx
+*.heic
+*.HEIC
+
+# Note: raw bench logs in data/raw/ ARE committed. They are the evidence behind D7.
+
+# Files the CircuitPython board writes on its own drive
+boot_out.txt
+.fseventsd/
+
+# macOS and Windows
 .DS_Store
+._*
 Thumbs.db
