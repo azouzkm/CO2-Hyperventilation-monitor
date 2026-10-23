@@ -1,4 +1,4 @@
-# Group 6 — Project 6: Is the Patient Ventilating?
+#  Project 6: Is the Patient Ventilating?
 
 Exhaled CO₂ and hypoventilation monitor (bench prototype).
 
@@ -7,7 +7,7 @@ Sample airway gas → confirm exhaled CO₂ → derive breathing rate from the s
 while **measuring and honestly reporting its own response time**, rather than pretending to be a
 breath-by-breath capnograph.
 
-## Members (fill in names)
+## Members 
 - Member 1: Abdelaziz Mourad
 - Member 2: Nyah Woller-li
 - Member 3: Szirina Ismail
@@ -55,6 +55,3 @@ Honest response-time declaration:
    uvicorn service.main:app --reload
    ```
 3. **Dashboard**: open `http://localhost:8000` in a browser.
-
-## Submission
-Package `Group_6_Project_6_CO2Monitor.zip` and submit on MyCourses (due November 4).
