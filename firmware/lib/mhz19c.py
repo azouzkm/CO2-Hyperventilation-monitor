@@ -7,6 +7,10 @@ The two data wires sit on GP0 and GP1. On our cable the blue/green colours did n
 match the datasheet pin order, so the driver works with the wires either way round:
   NORMAL  : Pico TX GP0 -> sensor RX,  sensor TX -> Pico RX GP1   (hardware UART)
   SWAPPED : Pico TX GP1 -> sensor RX,  sensor TX -> Pico RX GP0   (PIO UART)
+
+A reading waits up to 0.5 s for the reply. While it waits it calls `idle(now)` if given, so the
+light ring keeps flashing, the speaker keeps playing and the button keeps working even when the
+sensor does not answer (25 Oct: with a data wire pulled, the ring froze mid-flash).
 """
 import time
 import array
@@ -48,22 +52,32 @@ def _find_reply(data, cmd):
     return None
 
 
-def _transact_normal(pkt, cmd, timeout):
+def _transact_normal(pkt, cmd, timeout, idle=None):
     uart = busio.UART(board.GP0, board.GP1, baudrate=BAUD, timeout=timeout)
     try:
         uart.reset_input_buffer()
         uart.write(pkt)
-        data = uart.read(9)
-        if data and len(data) < 9:
-            more = uart.read(9 - len(data))
-            if more:
-                data = data + more
+        data = b""
+        t0 = time.monotonic()
+        while True:
+            waiting = uart.in_waiting
+            if waiting:                           # read only what has arrived: never blocks
+                more = uart.read(min(waiting, 18 - len(data)))
+                if more:
+                    data += more
+                if len(data) >= 9 and _find_reply(data, cmd):
+                    break
+            now = time.monotonic()
+            if now - t0 >= timeout or len(data) >= 18:
+                break
+            if idle is not None:
+                idle(now)
         return _find_reply(data, cmd)
     finally:
         uart.deinit()
 
 
-def _transact_swapped(pkt, cmd, timeout):
+def _transact_swapped(pkt, cmd, timeout, idle=None):
     rx = rp2pio.StateMachine(
         _RX_PROG, frequency=8 * BAUD, first_in_pin=board.GP0, pull_in_pin_up=1,
         auto_push=True, push_threshold=8, in_shift_right=True)
@@ -86,6 +100,8 @@ def _transact_swapped(pkt, cmd, timeout):
                     data.append((word[0] >> 24) & 0xFF)  # 8 bits shifted in from the right
                     if len(data) >= 9 and _find_reply(bytes(data), cmd):
                         break
+                elif idle is not None:
+                    idle(time.monotonic())
             return _find_reply(bytes(data), cmd)
         finally:
             tx.deinit()
@@ -93,15 +109,15 @@ def _transact_swapped(pkt, cmd, timeout):
         rx.deinit()
 
 
-def _transact(orientation, pkt, cmd, timeout=0.5):
+def _transact(orientation, pkt, cmd, timeout=0.5, idle=None):
     if orientation == NORMAL:
-        return _transact_normal(pkt, cmd, timeout)
-    return _transact_swapped(pkt, cmd, timeout)
+        return _transact_normal(pkt, cmd, timeout, idle)
+    return _transact_swapped(pkt, cmd, timeout, idle)
 
 
-def read_co2(orientation):
-    """CO2 in ppm, or None if the sensor did not answer."""
-    reply = _transact(orientation, _command(_CMD_READ_CO2), _CMD_READ_CO2)
+def read_co2(orientation, idle=None):
+    """CO2 in ppm, or None if the sensor did not answer. idle(now) is called while waiting."""
+    reply = _transact(orientation, _command(_CMD_READ_CO2), _CMD_READ_CO2, idle=idle)
     return None if reply is None else reply[2] * 256 + reply[3]
 
 
@@ -110,11 +126,11 @@ def set_self_calibration(orientation, on):
     _transact(orientation, _command(_CMD_SELF_CAL, 0xA0 if on else 0x00), _CMD_SELF_CAL, 0.3)
 
 
-def probe():
+def probe(idle=None):
     """Try both wire orientations. Returns (orientation, ppm) or (None, None)."""
     for orientation in (NORMAL, SWAPPED):
         try:
-            ppm = read_co2(orientation)
+            ppm = read_co2(orientation, idle)
         except Exception as e:
             print("mhz19c", orientation, "error:", e)
             ppm = None
