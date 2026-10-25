@@ -39,6 +39,10 @@ class FakeUART:
         if FakeSensor.wiring == "normal" and bytes(b) == READ_CMD:
             self.buf = reply(FakeSensor.ppm)
 
+    @property
+    def in_waiting(self):
+        return len(self.buf)
+
     def read(self, n):
         out, self.buf = self.buf[:n], self.buf[n:]
         return out or None
@@ -102,6 +106,15 @@ def test_probe_swapped_wiring():
 def test_probe_no_sensor():
     FakeSensor.wiring = None
     assert mhz19c.probe() == (None, None)
+
+
+def test_no_answer_keeps_calling_idle_while_it_waits():
+    # 25 Oct: with a data wire pulled the reads waited 1.5 s per second and the ring froze
+    FakeSensor.wiring = None
+    calls = []
+    assert mhz19c.probe(idle=calls.append) == (None, None)
+    assert len(calls) > 20                      # both orientations, the whole wait
+    assert calls[-1] - calls[0] > 0.8
 
 
 def test_bad_checksum_rejected():

@@ -64,12 +64,40 @@ def test_single_breaths_are_caught_quickly_and_clear():
         assert len([c for c in ch if c[0] >= t0]) <= 2, ch     # no flip-flopping
 
 
-def test_stuck_at_400_is_a_fault_both_times_it_happened():
+def test_both_sensor_faults_are_caught_at_their_first_impossible_reading():
+    # 22 Oct, fault 1: 1,784 -> 778 ppm in one second (00:25:57); fault 2: 846 -> 400 (01:31:46).
+    # Both then sat at 400 ppm, which is also reported, with what to check.
     ch = replay("00:25:00", "01:45:59")
-    faults = [t for t, s, _ in ch if s == FAULT]
-    assert len(faults) == 2, ch
-    assert abs(faults[0] - secs("00:26:32")) <= 2 and abs(faults[1] - secs("01:32:29")) <= 2
-    assert all("stuck at 400" in r for _, s, r in ch if s == FAULT)
+    starts = [t for t, s, r in ch if s == FAULT and "jumped" in r]
+    assert starts[0] == secs("00:25:57") and secs("01:31:46") in starts, ch
+    for t0, t1 in (("00:25:57", "00:29:22"), ("01:31:46", "01:34:26")):
+        reasons = [r for t, s, r in ch if s == FAULT and secs(t0) <= t <= secs(t1)]
+        assert any("stuck at 400" in r for r in reasons), ch
+    outside = [t for t, s, _ in ch if s == FAULT and not (secs("00:25:57") <= t <= secs("00:29:22")
+                                                          or secs("01:31:46") <= t <= secs("01:34:26"))]
+    assert not outside, ch                                    # no false faults the rest of the night
+
+
+def test_real_breaths_are_never_taken_for_jumps():
+    # the fastest real changes on the bench: 654 ppm/s up (a breath straight into the flow cell,
+    # 25 Oct) and 163 ppm/s down; the limits keep a margin of about 2x over both
+    assert cr1.RISE_JUMP_PPM >= 1.8 * 654 and cr1.FALL_JUMP_PPM >= 2 * 163
+    mon = PresenceMonitor()
+    rise = [830] * 100 + [830 + 654 * k for k in range(1, 7)] + [5000] * 20 + [5000 - 163 * k for k in range(1, 26)]
+    for t, p in enumerate(rise):
+        mon.update(float(t), p)
+        assert mon.state != FAULT, (t, p, mon.reason)
+
+
+def test_no_false_present_while_the_sensor_recovers_from_a_fault():
+    # 22 Oct, 01:34:27: the reading came back from the second stuck-at-400 fault, climbed and
+    # overshot to 2,265 ppm. Without the recovery wait that read as PRESENT for 90 s.
+    ch = replay("01:25:00", "01:45:59")
+    back = first(ch, WARMING_UP, secs("01:32:29"))
+    assert back is not None and abs(back - secs("01:34:27")) <= 2, ch
+    trusted = first(ch, ABSENT, back)
+    assert trusted is not None and trusted - back >= cr1.RECOVERY_S, ch
+    assert first(ch, PRESENT, secs("01:32:29")) is None or first(ch, PRESENT, secs("01:32:29")) > trusted
 
 
 def test_open_air_cannot_tell_the_operator_from_a_breath():
@@ -121,22 +149,31 @@ def test_slow_fall_stays_present_for_cr4_to_judge():
         if t < 100:
             return 800
         if t < 130:
-            return 3000
+            return min(3000, 800 + 400 * (t - 99))      # a real rise: about 400 ppm/s at most
         return int(3000 - 4 * (t - 130))
     mon = PresenceMonitor()
     ch = feed(mon, ppm, 80, 430)
     assert [s for _, s, _ in ch] == [ABSENT, PRESENT], ch
 
 
-def test_no_answer_is_a_fault_and_recovers():
+def test_no_answer_is_a_fault_then_a_re_warm_then_absent():
     mon = PresenceMonitor()
-    seq = [500] * 80 + [820] * 20 + [None] * 5 + [820] * 10
+    seq = [500] * 80 + [820] * 20 + [None] * 5 + [820] * (cr1.RECOVERY_S + 10)
     states = []
     for t, p in enumerate(seq):
         mon.update(float(t), p)
         states.append(mon.state)
-    assert states[101] == FAULT and states[-1] == ABSENT
+    assert states[101] == FAULT and states[105] == WARMING_UP
+    assert states[105 + cr1.RECOVERY_S - 1] == WARMING_UP and states[-1] == ABSENT
     assert cr1.PRESENT_RISE == 100   # the threshold the 22 Oct replays were checked with
+
+
+def test_breathing_after_a_fault_is_called_once_the_re_warm_ends():
+    mon = PresenceMonitor()
+    seq = [820] * 100 + [None] * 3 + [5000] * (cr1.RECOVERY_S + 5)
+    for t, p in enumerate(seq):
+        mon.update(float(t), p)
+    assert mon.state == PRESENT
 
 
 if __name__ == "__main__":

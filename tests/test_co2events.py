@@ -169,31 +169,80 @@ class _Done(Exception):
     pass
 
 
+RING_FRAMES = []   # (time, bytes) written to the light ring during the last dry run
+TONES = []         # (time, frequency or 0) sent to the speaker during the last dry run
+BUTTON_DOWN = []   # (from, to) times when the simulated button is held down
+
+
 def _dry_run(sensor_fn, start, stop):
     """Run firmware/code.py against `sensor_fn(t)` on a virtual clock; return the printed lines."""
     clock = _Clock(start=start, stop=stop)
+    del RING_FRAMES[:]
+    del TONES[:]
 
     fake_time = types.ModuleType("time")
     fake_time.monotonic = clock.monotonic
     fake_time.sleep = clock.sleep
     fake_board = types.ModuleType("board")
     fake_board.LED = "LED"
+    fake_board.GP16, fake_board.GP18, fake_board.GP20 = "GP16", "GP18", "GP20"
+    fake_pwmio = types.ModuleType("pwmio")
+
+    class PWMOut:
+        def __init__(self, pin, frequency=500, duty_cycle=0, variable_frequency=False):
+            self.frequency, self._duty = frequency, duty_cycle
+
+        @property
+        def duty_cycle(self):
+            return self._duty
+
+        @duty_cycle.setter
+        def duty_cycle(self, v):
+            self._duty = v
+            TONES.append((clock.now, self.frequency if v else 0))
+
+    fake_pwmio.PWMOut = PWMOut
+    fake_npw = types.ModuleType("neopixel_write")
+    fake_npw.neopixel_write = lambda pin, buf: RING_FRAMES.append((clock.now, bytes(buf)))
     fake_dio = types.ModuleType("digitalio")
 
     class DigitalInOut:
         def __init__(self, pin):
-            self.value = False
+            self.pin = pin
+            self._value = False
             self.direction = None
+            self.pull = None
+
+        @property
+        def value(self):
+            if self.pin == "GP20":   # button: pulled up, low while held down
+                return not any(a <= clock.now < b for a, b in BUTTON_DOWN)
+            return self._value
+
+        @value.setter
+        def value(self, v):
+            self._value = v
 
     fake_dio.DigitalInOut = DigitalInOut
-    fake_dio.Direction = types.SimpleNamespace(OUTPUT="out")
+    fake_dio.Direction = types.SimpleNamespace(OUTPUT="out", INPUT="in")
+    fake_dio.Pull = types.SimpleNamespace(UP="up", DOWN="down")
     fake_mhz = types.ModuleType("mhz19c")
-    fake_mhz.read_co2 = lambda orientation: sensor_fn(clock.now)
-    fake_mhz.probe = lambda: ("normal", sensor_fn(clock.now))
+    def fake_read(orientation, idle=None):
+        ppm = sensor_fn(clock.now)
+        if ppm is None:                    # no answer: the real driver waits 0.5 s, calling idle
+            for _ in range(25):
+                clock.now += 0.02
+                if idle is not None:
+                    idle(clock.now)
+        return ppm
 
-    saved = {k: sys.modules.get(k) for k in ("time", "board", "digitalio", "mhz19c")}
-    sys.modules.update(time=fake_time, board=fake_board, digitalio=fake_dio, mhz19c=fake_mhz)
-    for k in ("indicator", "cr1"):          # re-import against this run's fake clock
+    fake_mhz.read_co2 = fake_read
+    fake_mhz.probe = lambda idle=None: ("normal", fake_read("normal", idle))
+
+    saved = {k: sys.modules.get(k) for k in ("time", "board", "digitalio", "mhz19c", "neopixel_write", "pwmio")}
+    sys.modules.update(time=fake_time, board=fake_board, digitalio=fake_dio, mhz19c=fake_mhz,
+                       neopixel_write=fake_npw, pwmio=fake_pwmio)
+    for k in ("indicator", "cr1", "annunciator"):   # re-import against this run's fake clock
         sys.modules.pop(k, None)
     lines = []
     import builtins
@@ -212,7 +261,7 @@ def _dry_run(sensor_fn, start, stop):
                 sys.modules.pop(k, None)
             else:
                 sys.modules[k] = v
-        for k in ("indicator", "cr1"):
+        for k in ("indicator", "cr1", "annunciator"):
             sys.modules.pop(k, None)
     return lines
 
@@ -234,19 +283,105 @@ def test_code_py_dry_run():
 
 def test_code_py_flags_a_reading_stuck_at_the_floor():
     # 22 Oct 2026: the sensor's brown HD wire touched the laptop's grounded case and the
-    # reading sat at exactly 400 ppm until the wire was moved
+    # reading sat at exactly 400 ppm until the wire was moved. After the fault the monitor
+    # re-warms for 3 minutes (cr1.RECOVERY_S), so the test breath comes after that.
     def sensor(t):
         if 200 <= t < 300:
             return 400
-        return int(first_order(t, 450, 456, 830, 6000, 12.0, 40.0))
+        return int(first_order(t, 550, 556, 830, 6000, 12.0, 40.0))
 
-    lines = _dry_run(sensor, 100.0, 700.0)
+    lines = _dry_run(sensor, 100.0, 800.0)
     text = "\n".join(lines)
     assert text.count("SENSOR FAULT: reading stuck at 400 ppm") == 1
     assert any(ln.startswith("t=") and "FAULT" in ln for ln in lines)
-    assert ">>> CO2 ABSENT: no exhaled CO2 yet <<<" in text   # recovered after the fault
+    assert ">>> WARMING UP: sensor back after a fault; trusted again in 180 s <<<" in text
+    assert ">>> CO2 ABSENT: no exhaled CO2 yet <<<" in text   # trusted again after the re-warm
     # the floor readings must not become the room level: the breath is measured against ~830
     assert "=== CO2 event 1: room 8" in text, text[-600:]
+
+
+def _ring_kinds():
+    """The light ring's frames as a list of what they showed: a colour name, 'spin' or 'off'."""
+    names = {(0, 20, 0): "green", (20, 8, 0): "amber", (20, 0, 0): "red", (0, 16, 20): "cyan"}
+    kinds = []
+    for _, buf in RING_FRAMES:
+        px = [tuple(buf[i:i + 3]) for i in range(0, len(buf), 3)]
+        lit = [(r, g, b) for g, r, b in px if (g, r, b) != (0, 0, 0)]
+        if not lit:
+            k = "off"
+        elif len(lit) == 1:
+            k = "spin"
+        else:
+            assert len(lit) == 16 and len(set(lit)) == 1, px
+            k = names.get(lit[0], str(lit[0]))
+        if not kinds or kinds[-1] != k:
+            kinds.append(k)
+    return kinds
+
+
+def test_alarm_display_lamp_test_standby_normal_then_critical():
+    # power-up lamp test, STANDBY while warming up and before a breath, a breath (NORMAL, green),
+    # then the breath stops and the gas is flushed: CRITICAL, red flashing, with 10-pulse bursts
+    def sensor(t):
+        if t < 75:
+            return 500
+        return int(first_order(t, 200, 260, 830, 6000, 12.0, 40.0))
+    lines = _dry_run(sensor, 5.0, 330.0)
+    kinds = _ring_kinds()
+    assert kinds[:5] == ["green", "amber", "red", "cyan", "spin"], kinds
+    assert "green" in kinds[5:] and kinds[-2:] in (["red", "off"], ["off", "red"]), kinds
+    text = "\n".join(lines)
+    assert ">>> ALARM NORMAL: exhaled CO2 present <<<" in text
+    assert ">>> ALARM CRITICAL: CO2 lost:" in text
+    bursts = [t for t, f in TONES if f == 2400]
+    assert len(bursts) >= 10, TONES                        # a 10-pulse burst at least
+
+
+def test_sensor_fault_from_green_is_cyan_with_a_chirp():
+    # breathing (CO2 held at 2,000 ppm), then the data wire pulled for 15 s at 260 s
+    def sensor(t):
+        if t < 75:
+            return 500
+        if 260 <= t < 275:
+            return None
+        return 830 if t < 200 else min(2000, 830 + 60 * int(t - 200))
+    lines = _dry_run(sensor, 5.0, 290.0)
+    text = "\n".join(lines)
+    assert ">>> ALARM NORMAL: exhaled CO2 present <<<" in text
+    assert ">>> ALARM TECHNICAL: sensor fault: no answer from the sensor <<<" in text
+    assert "ALARM CRITICAL" not in text
+    assert "cyan" in _ring_kinds()[5:]
+    assert any(260 <= t < 262 and f == 3000 for t, f in TONES), TONES     # the chirp
+
+
+def test_red_keeps_flashing_and_beeping_while_the_sensor_is_silent():
+    # 25 Oct: a data wire pulled during a CRITICAL alarm froze the ring on steady red, because the
+    # program sat waiting for the sensor. The alarm must stay CRITICAL (a fault never hides it),
+    # and keep flashing and beeping.
+    def sensor(t):
+        if t < 75:
+            return 500
+        if 335 <= t < 365:
+            return None
+        return int(first_order(t, 200, 260, 830, 6000, 12.0, 40.0))
+    lines = _dry_run(sensor, 5.0, 380.0)
+    text = "\n".join(lines)
+    assert ">>> ALARM CRITICAL stays; also a sensor problem" in text
+    during = [buf for t, buf in RING_FRAMES if 337 <= t < 363]
+    assert len(set(during)) == 2 and len(during) >= 40, len(during)   # red / off, 2 flashes a second
+    assert sum(1 for t, f in TONES if 337 <= t < 363 and f == 2400) >= 10   # bursts carry on
+
+
+def test_start_up_chirp_and_button_beep():
+    BUTTON_DOWN[:] = [(150.0, 150.3), (150.31, 150.32)]      # one press, plus a contact bounce
+    try:
+        lines = _dry_run(lambda t: 830 if t >= 75 else 500, 5.0, 200.0)
+    finally:
+        BUTTON_DOWN[:] = []
+    assert [f for _, f in TONES[:3]] == [1800, 2600, 0], TONES[:4]     # chirp at start-up
+    assert sum(1 for ln in lines if ">>> BUTTON pressed <<<" in ln) == 1
+    assert any(150.0 <= t <= 151.5 and f == 2000 for t, f in TONES), TONES
+    assert TONES[-1][1] == 0                                          # silent again
 
 
 if __name__ == "__main__":
