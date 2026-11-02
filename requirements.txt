@@ -1,6 +1,6 @@
-fastapi
-uvicorn
+flask
 pyserial
+certifi
 pandas
 numpy
 matplotlib

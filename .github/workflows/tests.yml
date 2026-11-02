@@ -23,7 +23,7 @@ jobs:
           python-version: "3.11"   # the version listed on the project card
 
       - name: Install pytest
-        run: python -m pip install pytest
+        run: python -m pip install pytest flask pyserial
 
       - name: Run the tests (several replay the real 22 Oct bench readings)
         run: python -m pytest -v tests/

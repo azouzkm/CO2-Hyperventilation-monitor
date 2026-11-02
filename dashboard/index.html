@@ -1,34 +1,708 @@
-<!DOCTYPE html>
+<!doctype html>
 <html lang="en">
 <head>
-  <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>Project 6 — CO2 Monitor</title>
-  <style>
-    body { font-family: system-ui, sans-serif; margin: 24px; background: #111; color: #eee; }
-    #banner { font-size: 2rem; font-weight: bold; padding: 16px; border-radius: 8px; text-align: center; }
-    #banner.normal    { background: #0a0; color: #000; }
-    #banner.advisory  { background: #fb0; color: #000; }
-    #banner.critical  { background: #d00; color: #fff; }
-    #banner.technical { background: #0bb; color: #000; }
-  </style>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Team 6 CO₂ monitor</title>
+<style>
+  :root {
+    --stage: #000000;
+    --rule: #1d2830;
+    --ink: #e8eef2;
+    --ink-2: #93a3ae;
+    --ink-3: #5d6c77;
+    --co2: #ffd23f;
+    --green: #33d17a;
+    --amber: #ffb020;
+    --red: #ff4d4d;
+    --cyan: #2ed3f2;
+    --white: #dde4ea;
+    --off: #1a232a;
+    --state: var(--ink-3);
+    --num: "DIN Alternate", "DIN Condensed", "Barlow Condensed", "Roboto Condensed", "DejaVu Sans Condensed", "Arial Narrow", sans-serif;
+    --text: "Avenir Next", "Avenir", "Inter", "Segoe UI", system-ui, sans-serif;
+  }
+  * { box-sizing: border-box; }
+  [hidden] { display: none !important; }
+  html, body { margin: 0; background: var(--stage); color: var(--ink); }
+  body { font-family: var(--text); font-size: 16px; line-height: 1.45; min-height: 100vh; }
+  button, input { font: inherit; }
+  :focus-visible { outline: 3px solid var(--white); outline-offset: 2px; }
+
+  .bar { display: flex; align-items: baseline; gap: 24px; padding: 14px 28px; border-bottom: 1px solid var(--rule); }
+  .bar .ident { flex: 1; color: var(--ink-2); }
+  .bar .ident strong { color: var(--ink); font-weight: 600; margin-right: 10px; }
+  .link { display: flex; align-items: center; gap: 8px; color: var(--ink-2); }
+  .link .dot { width: 10px; height: 10px; border-radius: 50%; background: var(--ink-3); flex: none; }
+  .link[data-link="live"] .dot { background: var(--green); }
+  .link[data-link="lost"] .dot, .link[data-link="down"] .dot { background: var(--cyan); }
+  .clock { font-family: var(--num); font-size: 22px; color: var(--ink); font-variant-numeric: tabular-nums; }
+
+  .soundbar { display: flex; align-items: center; gap: 16px; padding: 10px 28px; background: var(--amber); color: #1b1300; font-weight: 600; }
+  .soundbar[hidden] { display: none; }
+  .soundbar button { background: #1b1300; color: var(--amber); border: 0; border-radius: 6px; padding: 8px 16px; font-weight: 600; cursor: pointer; }
+
+  main { display: grid; grid-template-columns: minmax(300px, 400px) 1fr; grid-template-areas: "stage alarm" "stage numbers" "trend trend" "log log"; }
+  .stage { grid-area: stage; display: flex; flex-direction: column; align-items: center; justify-content: center; padding: 28px; border-right: 1px solid var(--rule); border-bottom: 1px solid var(--rule); }
+  #ring { width: min(300px, 70vw); height: auto; display: block; }
+  .word { font-family: var(--num); font-size: 64px; line-height: 1; margin: 18px 0 0; color: var(--state); text-align: center; font-weight: 700; letter-spacing: 0.01em; }
+  .stage .line { color: var(--ink-2); margin: 10px 0 0; text-align: center; max-width: 32ch; }
+
+  .alarm { grid-area: alarm; padding: 26px 32px; border-bottom: 1px solid var(--rule); min-height: 190px; display: flex; flex-direction: column; justify-content: center; }
+  .alarm .title { font-size: 30px; font-weight: 600; margin: 0; line-height: 1.2; }
+  .alarm .why { margin: 8px 0 0; color: var(--ink-2); max-width: 70ch; }
+  .alarm .hint { margin: 6px 0 0; color: var(--ink); max-width: 70ch; }
+  .alarm[data-tone="critical"] { background: var(--red); color: #fff; }
+  .alarm[data-tone="critical"] .why, .alarm[data-tone="critical"] .hint { color: #fff; }
+  .alarm[data-tone="critical-held"] { background: #3a0d0f; box-shadow: inset 6px 0 0 var(--red); }
+  .alarm[data-tone="advisory"] { background: var(--amber); color: #1b1300; }
+  .alarm[data-tone="advisory"] .why, .alarm[data-tone="advisory"] .hint { color: #1b1300; }
+  .alarm[data-tone="technical"] { background: #062c35; box-shadow: inset 6px 0 0 var(--cyan); }
+  .alarm[data-tone="calm"] .title { color: var(--ink-2); font-weight: 500; font-size: 22px; }
+  .ackrow { display: flex; flex-wrap: wrap; align-items: center; gap: 12px 16px; margin-top: 18px; }
+  .ackrow[hidden] { display: none; }
+  .ackrow label { display: flex; align-items: center; gap: 8px; }
+  .ackrow input { width: 6.5em; padding: 9px 10px; border-radius: 6px; border: 1px solid rgba(255,255,255,.55); background: rgba(0,0,0,.35); color: inherit; text-transform: uppercase; }
+  #ack { padding: 12px 26px; border-radius: 8px; border: 2px solid currentColor; background: #fff; color: #000; font-weight: 700; font-size: 18px; cursor: pointer; }
+  #ack:disabled { opacity: .45; cursor: default; }
+  .ackmsg { flex-basis: 100%; margin: 0; }
+
+  .numbers { grid-area: numbers; display: grid; grid-template-columns: auto 1fr; gap: 8px 48px; padding: 22px 32px; border-bottom: 1px solid var(--rule); align-items: end; }
+  .num .label { display: block; color: var(--ink-2); }
+  .num .value { font-family: var(--num); font-weight: 700; font-size: 84px; line-height: 0.95; font-variant-numeric: tabular-nums; }
+  .num .unit { color: var(--ink-2); margin-left: 8px; font-size: 20px; }
+  .num.co2 .value { color: var(--co2); }
+  .num.cr1 .value { font-size: 48px; }
+  .num .sub { display: block; color: var(--ink-2); margin-top: 6px; }
+
+  .trend { grid-area: trend; padding: 18px 32px 10px; border-bottom: 1px solid var(--rule); }
+  .trendhead { display: flex; flex-wrap: wrap; align-items: baseline; gap: 6px 22px; margin-bottom: 6px; }
+  h2 { font-size: 17px; font-weight: 600; margin: 0; }
+  .key { display: flex; flex-wrap: wrap; gap: 4px 16px; color: var(--ink-2); font-size: 14px; }
+  .key span::before { content: ""; display: inline-block; width: 12px; height: 8px; border-radius: 2px; margin-right: 6px; background: var(--c); vertical-align: 1px; }
+  #chart { width: 100%; height: 250px; display: block; }
+
+  .log { grid-area: log; padding: 18px 32px 28px; display: grid; grid-template-columns: 1fr minmax(240px, 320px); gap: 24px 48px; }
+  #alarms { list-style: none; margin: 10px 0 0; padding: 0; }
+  #alarms li { display: grid; grid-template-columns: 5.2em 7.5em 1fr; gap: 4px 14px; padding: 9px 0; border-top: 1px solid var(--rule); }
+  #alarms .t { font-family: var(--num); font-variant-numeric: tabular-nums; color: var(--ink-2); font-size: 18px; }
+  #alarms .p { font-weight: 600; }
+  #alarms .p::before { content: ""; display: inline-block; width: 10px; height: 10px; border-radius: 50%; margin-right: 8px; background: var(--c); }
+  #alarms .d { color: var(--ink-2); }
+  #alarms .d b { color: var(--ink); font-weight: 500; }
+  #alarms .empty { display: block; color: var(--ink-3); }
+  .about dl { margin: 10px 0 0; display: grid; grid-template-columns: auto 1fr; gap: 6px 14px; color: var(--ink-2); }
+  .about dt { color: var(--ink-3); }
+  .about dd { margin: 0; overflow-wrap: anywhere; }
+  .about button { margin-top: 14px; background: transparent; color: var(--ink); border: 1px solid var(--ink-3); border-radius: 6px; padding: 7px 14px; cursor: pointer; }
+  .about a { color: var(--cyan); }
+  .phonefail { margin: 10px 0 0; color: var(--amber); }
+
+  @media (max-width: 860px) {
+    .bar .ident { flex-basis: 100%; }
+    .bar .ident strong { display: block; }
+    .soundbar { flex-wrap: wrap; padding: 12px 16px; }
+    main { grid-template-columns: 1fr; grid-template-areas: "stage" "alarm" "numbers" "trend" "log"; }
+    .stage { border-right: 0; }
+    .bar { flex-wrap: wrap; padding: 12px 16px; gap: 6px 18px; }
+    .alarm, .numbers, .trend, .log { padding-left: 16px; padding-right: 16px; }
+    .numbers { grid-template-columns: 1fr; }
+    .num .value { font-size: 64px; }
+    .log { grid-template-columns: 1fr; }
+    #alarms li { grid-template-columns: 4.6em 1fr; }
+    #alarms .d { grid-column: 1 / -1; }
+  }
+</style>
 </head>
 <body>
-  <div id="banner" class="normal">NORMAL</div>
-  <p>CO2: <span id="co2">--</span> %</p>
-  <!-- TODO: draw the live trace with Chart.js/Plotly, polling /api/latest at 1 Hz -->
-  <script>
-    async function poll() {
-      try {
-        const r = await fetch('/api/latest');
-        const d = await r.json();
-        document.getElementById('co2').textContent = d.co2_pct;
-        document.getElementById('banner').className = d.state;
-        document.getElementById('banner').textContent = d.state.toUpperCase();
-      } catch (e) { /* stay silent when the service is down */ }
+<header class="bar">
+  <div class="ident"><strong>CO₂ ventilation monitor</strong>Team 6 bench prototype, not for patient use</div>
+  <div class="link" id="link" data-link="waiting"><span class="dot"></span><span id="linkText">Connecting to the service</span></div>
+  <div class="clock" id="clock">--:--:--</div>
+</header>
+
+<div class="soundbar" id="soundbar" hidden>
+  <span>Alarm sound is off on this screen. The browser needs one click before it may play sound.</span>
+  <button id="soundOn" type="button">Turn on alarm sound</button>
+</div>
+
+<main>
+  <section class="stage" aria-label="Alarm light">
+    <svg id="ring" viewBox="-120 -120 240 240" role="img" aria-label="Light ring, as on the monitor">
+      <defs>
+        <radialGradient id="dome" r="0.5">
+          <stop offset="0" stop-color="#000" stop-opacity="0.06"/>
+          <stop offset="0.55" stop-color="#000" stop-opacity="0.16"/>
+          <stop offset="0.72" stop-color="#000" stop-opacity="0.55"/>
+          <stop offset="0.86" stop-color="#000" stop-opacity="0.20"/>
+          <stop offset="1" stop-color="#000" stop-opacity="0"/>
+        </radialGradient>
+        <filter id="bloom" x="-60%" y="-60%" width="220%" height="220%"><feGaussianBlur stdDeviation="6"/></filter>
+      </defs>
+      <circle r="99" fill="#06090b" stroke="#24313a" stroke-width="1"/>
+      <circle id="glow" r="118" fill="url(#dome)" opacity="0"/>
+      <g id="bloomLeds" filter="url(#bloom)"></g>
+      <g id="leds"></g>
+    </svg>
+    <p class="word" id="word">Waiting</p>
+    <p class="line" id="line" role="status" aria-live="polite">Connecting to the laptop service.</p>
+  </section>
+
+  <section class="alarm" id="alarm" data-tone="calm" aria-live="assertive">
+    <p class="title" id="alarmTitle">No alarm</p>
+    <p class="why" id="alarmWhy"></p>
+    <p class="hint" id="alarmHint"></p>
+    <div class="ackrow" id="ackrow" hidden>
+      <label for="who">Your initials <input id="who" maxlength="6" autocomplete="off" spellcheck="false"></label>
+      <button id="ack" type="button">Acknowledge</button>
+      <p class="ackmsg" id="ackMsg" role="status"></p>
+    </div>
+  </section>
+
+  <section class="numbers" aria-label="Readings">
+    <div class="num co2"><span class="label">CO₂ at the sensor</span><span class="value" id="ppm">--</span><span class="unit">ppm</span><span class="sub" id="ppmSub">Scale 400 to 5,000 ppm</span></div>
+    <div class="num cr1"><span class="label">Exhaled CO₂</span><span class="value" id="cr1">--</span><span class="sub" id="cr1Sub"></span></div>
+  </section>
+
+  <section class="trend" aria-label="CO2 trend">
+    <div class="trendhead">
+      <h2>CO₂ in ppm, last 10 minutes</h2>
+      <div class="key" aria-label="Colours of the strip under the trace">
+        <span style="--c: var(--green)">breathing</span>
+        <span style="--c: var(--red)">critical</span>
+        <span style="--c: var(--amber)">advisory</span>
+        <span style="--c: var(--cyan)">technical</span>
+        <span style="--c: var(--white)">standby</span>
+      </div>
+    </div>
+    <canvas id="chart" aria-label="CO2 in ppm over the last 10 minutes"></canvas>
+  </section>
+
+  <section class="log">
+    <div>
+      <h2>Alarms</h2>
+      <ol id="alarms"><li><span class="empty">No alarms yet.</span></li></ol>
+    </div>
+    <div class="about">
+      <h2>This screen</h2>
+      <dl>
+        <dt>Monitor</dt><dd id="fw">--</dd>
+        <dt>Link</dt><dd id="port">--</dd>
+        <dt>Saving to</dt><dd id="rawlog">--</dd>
+        <dt>Sound</dt><dd id="soundState">off</dd>
+        <dt>Phones</dt><dd id="phones"><a href="/register">Sign up for alarm messages</a></dd>
+      </dl>
+      <p class="phonefail" id="phoneFail" hidden></p>
+      <button id="testSound" type="button">Play a test sound</button>
+    </div>
+  </section>
+</main>
+
+<script>
+"use strict";
+// ---------------------------------------------------------------------------------------------
+// What each state looks like. The ring copies firmware/lib/indicator.py, so the screen and the
+// box speak one visual language. LINK LOST and NO SERVICE exist only here.
+const COLOUR = { green: "#33d17a", amber: "#ffb020", red: "#ff4d4d", cyan: "#2ed3f2", white: "#dde4ea", off: "#1a232a" };
+const LOOK = {
+  "WAITING":       { colour: null,    pattern: "off",       word: "Waiting",        tone: "calm" },
+  "STANDBY":       { colour: "white", pattern: "spin",      word: "Standby",        tone: "calm" },
+  "NORMAL":        { colour: "green", pattern: "steady",    word: "Breathing",      tone: "calm" },
+  "ADVISORY":      { colour: "amber", pattern: "slow",      word: "Advisory",       tone: "advisory" },
+  "CRITICAL":      { colour: "red",   pattern: "fast",      word: "CO₂ lost",       tone: "critical" },
+  "CRITICAL ACK":  { colour: "red",   pattern: "steady",    word: "CO₂ lost",       tone: "critical-held" },
+  "CRITICAL BACK": { colour: "red",   pattern: "alternate", word: "CO₂ back",       tone: "critical" },
+  "TECHNICAL":     { colour: "cyan",  pattern: "steady",    word: "Sensor problem", tone: "technical" },
+  "LINK LOST":     { colour: "cyan",  pattern: "breathe",   word: "No data",        tone: "technical" },
+  "NO SERVICE":    { colour: "cyan",  pattern: "breathe",   word: "No service",     tone: "technical" },
+  "UNKNOWN":       { colour: null,    pattern: "off",       word: "No alarm state", tone: "calm" },
+};
+const RIBBON = { "STANDBY": "white", "NORMAL": "green", "ADVISORY": "amber", "CRITICAL": "red", "CRITICAL ACK": "red",
+                 "CRITICAL BACK": "red", "TECHNICAL": "cyan" };
+const reduceMotion = window.matchMedia && window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+
+const $ = (id) => document.getElementById(id);
+const pad = (n) => String(n).padStart(2, "0");
+const clock = (t) => { const d = new Date(t * 1000); return pad(d.getHours()) + ":" + pad(d.getMinutes()) + ":" + pad(d.getSeconds()); };
+const hm = (t) => { const d = new Date(t * 1000); return pad(d.getHours()) + ":" + pad(d.getMinutes()); };
+function ago(s) {
+  if (s < 60) return Math.round(s) + " s";
+  const m = Math.floor(s / 60);
+  return m < 60 ? m + " min " + pad(Math.round(s - 60 * m)) + " s" : Math.floor(m / 60) + " h " + pad(m % 60) + " min";
+}
+function remember(key, value) { try { localStorage.setItem(key, value); } catch (e) { /* private window */ } }
+function recall(key) { try { return localStorage.getItem(key) || ""; } catch (e) { return ""; } }
+
+// ---------------------------------------------------------------------------------------------
+// The light ring: 16 lights, as on the box
+const LEDS = [], BLOOM = [];
+(function buildRing() {
+  const NS = "http://www.w3.org/2000/svg";
+  for (let i = 0; i < 16; i++) {
+    const a = (i / 16) * Math.PI * 2 - Math.PI / 2;
+    for (const [list, parent, r] of [[BLOOM, $("bloomLeds"), 13], [LEDS, $("leds"), 9.5]]) {
+      const c = document.createElementNS(NS, "circle");
+      c.setAttribute("cx", (80 * Math.cos(a)).toFixed(2));
+      c.setAttribute("cy", (80 * Math.sin(a)).toFixed(2));
+      c.setAttribute("r", String(r));
+      c.setAttribute("fill", COLOUR.off);
+      parent.appendChild(c);
+      list.push(c);
     }
-    setInterval(poll, 1000);
-    poll();
-  </script>
+  }
+})();
+
+function ringFrame(look, t) {
+  // returns [colour name or null for each light], and a glow strength 0..1
+  const col = look.colour;
+  const all = (c) => new Array(16).fill(c);
+  switch (look.pattern) {
+    case "spin": { const k = Math.floor(t / (reduceMotion ? 0.5 : 0.12)) % 16; return [all(null).map((x, i) => i === k ? col : null), 0.25]; }
+    case "steady": return [all(col), 1];
+    case "slow": { const on = (t % 1.6) < 0.8; return reduceMotion ? [all(col), on ? 1 : 0.5] : [all(on ? col : null), on ? 1 : 0]; }
+    case "fast": { const on = (t % 0.5) < 0.25; return reduceMotion ? [all(col), on ? 1 : 0.6] : [all(on ? col : null), on ? 1 : 0]; }
+    case "alternate": { const red = (t % 2) < 1; return [all(red ? "red" : "green"), 1]; }
+    case "breathe": { const k = 0.5 + 0.5 * Math.sin(t * Math.PI * 0.8); return [all(col), 0.25 + 0.75 * k]; }
+    default: return [all(null), 0];
+  }
+}
+
+function drawRing(t) {
+  const look = LOOK[current.display] || LOOK.UNKNOWN;
+  const [cols, glow] = ringFrame(look, t);
+  let lit = null, count = 0;
+  const level = look.pattern === "breathe" ? 0.35 + 0.65 * glow : 1;
+  for (let i = 0; i < 16; i++) {
+    const c = cols[i];
+    LEDS[i].setAttribute("fill", c ? COLOUR[c] : COLOUR.off);
+    LEDS[i].setAttribute("opacity", c ? level.toFixed(2) : "1");
+    BLOOM[i].setAttribute("fill", c ? COLOUR[c] : "none");
+    BLOOM[i].setAttribute("opacity", c ? (0.85 * level).toFixed(2) : "0");
+    if (c) { lit = c; count++; }
+  }
+  const dome = $("glow");
+  if (lit) {
+    if (dome.dataset.colour !== lit) {
+      for (const st of document.querySelectorAll("#dome stop")) st.setAttribute("stop-color", COLOUR[lit]);
+      dome.dataset.colour = lit;
+    }
+    dome.setAttribute("opacity", ((count / 16) * glow).toFixed(3));
+  } else {
+    dome.setAttribute("opacity", "0");
+  }
+}
+
+// ---------------------------------------------------------------------------------------------
+// Sound: built in the browser, so it plays through the laptop's speakers at the laptop's volume.
+// Patterns follow the board (and IEC 60601-1-8): critical 10 pulses every 10 s, advisory
+// 3 pulses every 20 s, technical a two-note chirp every 30 s.
+const Sound = {
+  ctx: null, master: null, wave: null, playing: null, nextAt: 0, nodes: [],
+  enabled() { return !!this.ctx && this.ctx.state === "running"; },
+  async enable() {
+    try {
+      if (!this.ctx) {
+        const AC = window.AudioContext || window.webkitAudioContext;
+        this.ctx = new AC();
+        this.master = this.ctx.createGain();
+        this.master.gain.value = 0.9;
+        this.master.connect(this.ctx.destination);
+        // a tone with harmonics, as the alarm standard asks: easier to hear and to place than a sine
+        const real = new Float32Array([0, 1, 0.5, 0.35, 0.25, 0.18]);
+        this.wave = this.ctx.createPeriodicWave(real, new Float32Array(real.length));
+      }
+      await this.ctx.resume();
+    } catch (e) { /* no audio on this device */ }
+    showSoundState();
+  },
+  pulse(at, dur, freq, gain) {
+    const o = this.ctx.createOscillator(), g = this.ctx.createGain();
+    o.setPeriodicWave(this.wave);
+    o.frequency.value = freq;
+    g.gain.setValueAtTime(0, at);
+    g.gain.linearRampToValueAtTime(gain, at + 0.015);
+    g.gain.setValueAtTime(gain, at + dur - 0.03);
+    g.gain.linearRampToValueAtTime(0, at + dur);
+    o.connect(g).connect(this.master);
+    o.start(at);
+    o.stop(at + dur + 0.02);
+    this.nodes.push(o);
+    o.onended = () => { this.nodes = this.nodes.filter((n) => n !== o); };
+  },
+  play(name, at) {
+    if (name === "critical") {
+      let t = at;
+      for (const group of [3, 2, 3, 2]) {
+        for (let i = 0; i < group; i++) { this.pulse(t, 0.15, 659, 0.55); t += 0.25; }
+        t += 0.25;
+      }
+    } else if (name === "advisory") {
+      for (let i = 0; i < 3; i++) this.pulse(at + i * 0.32, 0.2, 523, 0.45);
+    } else if (name === "technical") {
+      this.pulse(at, 0.12, 880, 0.35);
+      this.pulse(at + 0.16, 0.12, 659, 0.35);
+    }
+  },
+  REPEAT: { critical: 10, advisory: 20, technical: 30 },
+  update(name) {
+    if (!this.enabled()) return;
+    const now = this.ctx.currentTime;
+    if (name !== this.playing) {
+      this.stop();
+      this.playing = name;
+      this.nextAt = now;
+    }
+    if (name && now >= this.nextAt - 0.05) {
+      this.play(name, now + 0.02);
+      this.nextAt = now + this.REPEAT[name];
+    }
+  },
+  stop() {
+    for (const n of this.nodes) { try { n.stop(); } catch (e) {} }
+    this.nodes = [];
+    this.playing = null;
+  },
+  test() { if (this.enabled()) this.play("critical", this.ctx.currentTime + 0.02); },
+};
+
+function showSoundState() {
+  const on = Sound.enabled();
+  $("soundbar").hidden = on;
+  $("soundState").textContent = on ? "on, through this laptop's speakers" : "off (click Turn on alarm sound)";
+}
+$("soundOn").addEventListener("click", () => Sound.enable());
+$("testSound").addEventListener("click", async () => { await Sound.enable(); Sound.test(); });
+
+// ---------------------------------------------------------------------------------------------
+// The state, polled from the service once a second (interface IF-8)
+let current = { display: "WAITING" };
+let lastOk = 0;
+let lastData = null;
+let shownDisplay = null;
+let askedAt = null;          // when this screen last sent an acknowledgement
+
+function effective() {
+  // When the page cannot reach the service, it alarms by itself; a critical alarm it already
+  // knew about stays on screen (a fault never hides a patient alarm).
+  const down = lastOk && (Date.now() / 1000 - lastOk > 4);
+  if (!down) return current;
+  const keepCritical = lastData && (lastData.display === "CRITICAL" || lastData.display === "CRITICAL BACK") && !lastData.acked;
+  return Object.assign({}, lastData || {}, {
+    display: keepCritical ? lastData.display : "NO SERVICE",
+    sound: keepCritical ? "critical" : "technical",
+    serviceDown: true,
+  });
+}
+
+function render() {
+  const s = effective();
+  current = s;
+  const look = LOOK[s.display] || LOOK.UNKNOWN;
+  document.documentElement.style.setProperty("--state", look.colour ? COLOUR[look.colour] : "var(--ink-3)");
+  $("word").textContent = look.word;
+  document.title = look.word + " | Team 6 CO₂ monitor";
+  if (s.display !== shownDisplay) {
+    if (shownDisplay !== null && !(shownDisplay === "CRITICAL" && s.display === "CRITICAL ACK")) $("ackMsg").textContent = "";
+    shownDisplay = s.display;
+  }
+  if (askedAt && s.last_ack && s.last_ack.method === "dashboard" && Math.abs(s.last_ack.ts - askedAt) < 3) {
+    $("ackMsg").textContent = s.last_ack.confirmed ? "The monitor confirmed: its sound is off too."
+      : "The monitor did not confirm. Its own sound stays on until someone presses its button.";
+    askedAt = null;
+  }
+
+  // link
+  const link = $("link");
+  if (s.serviceDown) { link.dataset.link = "down"; $("linkText").textContent = "Lost the laptop service"; }
+  else if (s.link === "live") { link.dataset.link = "live"; $("linkText").textContent = "Live from the monitor"; }
+  else if (s.link === "lost") { link.dataset.link = "lost"; $("linkText").textContent = "No data for " + ago(s.since_rx_s || 0); }
+  else { link.dataset.link = "waiting"; $("linkText").textContent = "Waiting for the monitor"; }
+
+  // the line under the ring, and the alarm band
+  let line = "", title = "No alarm", why = "", hint = "", tone = look.tone;
+  const ackTxt = s.last_ack ? ("by " + s.last_ack.who + (s.last_ack.method === "dashboard" ? " on this screen" : " at the bedside") + " at " + clock(s.last_ack.ts)) : "";
+  switch (s.display) {
+    case "WAITING": line = "No reading from the monitor yet."; title = "Waiting for the monitor"; hint = "Plug in its USB cable. Readings appear here within a few seconds."; break;
+    case "STANDBY": line = "Not monitoring yet. Monitoring starts at the first breath."; title = "No alarm"; why = "Breathe into the sampling line to start monitoring."; break;
+    case "NORMAL": line = "Exhaled CO₂ present."; title = "No alarm"; break;
+    case "ADVISORY": line = s.why || ""; title = "Advisory"; why = s.why || ""; break;
+    case "CRITICAL": line = "Check the patient and the airway."; title = "CO₂ lost"; why = s.why || ""; hint = "Check the patient and the airway, then acknowledge."; break;
+    case "CRITICAL ACK": line = "Acknowledged. Sound off for 2 minutes."; title = "CO₂ lost, acknowledged"; why = s.why || ""; hint = (ackTxt ? "Acknowledged " + ackTxt + ". " : "") + "The alarm sounds again if CO₂ is still absent after 2 minutes."; break;
+    case "CRITICAL BACK": line = "Breathing again. The alarm stays until someone acknowledges it."; title = "CO₂ is back"; why = "The alarm stays on until someone acknowledges it, so a stop in breathing is never missed."; break;
+    case "TECHNICAL": line = "The equipment, not the patient."; title = "Sensor problem"; why = s.why || ""; hint = "This is never shown as a patient alarm. Check the sensor and its wires."; break;
+    case "LINK LOST": line = "Nothing from the monitor for " + ago(s.since_rx_s || 0) + "."; title = "No data from the monitor"; why = "Nothing received for " + ago(s.since_rx_s || 0) + ". Check the USB cable."; hint = "On the bench this cable also powers the monitor: with it out, the monitor is off too."; break;
+    case "NO SERVICE": line = "This page lost the laptop service."; title = "The dashboard lost the laptop service"; why = "Start it again in Terminal: bash tools/dashboard.sh"; hint = "The monitor keeps alarming on its own."; break;
+    default:   // firmware older than v0.4 reports CO2 but no alarm state
+      line = "This monitor reports CO₂ but no alarm state."; title = "No alarm state from the monitor";
+      why = "Firmware v0.4 and newer report the alarm states" + (s.fw ? "; this one is v" + s.fw + "." : ".");
+      hint = "Load the current firmware onto the board: see firmware/README.md.";
+  }
+  if ((s.display === "CRITICAL" || s.display === "CRITICAL BACK") && (s.link === "lost" || s.serviceDown)) {
+    hint = s.serviceDown
+      ? "This page lost the laptop service, so it shows the last alarm it received. Check the patient, then restart the service: bash tools/dashboard.sh"
+      : "No data from the monitor for " + ago(s.since_rx_s || 0) + ", so this is the last alarm it sent. Check the patient, then the USB cable.";
+  }
+  if (s.silenced_until && s.display !== "CRITICAL ACK" && s.sound === null && (look.tone !== "calm")) {
+    hint = (hint ? hint + " " : "") + "Sound off on this screen until " + clock(s.silenced_until) + ".";
+  }
+  $("line").textContent = line;
+  $("alarmTitle").textContent = title;
+  $("alarmWhy").textContent = why;
+  $("alarmHint").textContent = hint;
+  $("alarm").dataset.tone = tone;
+
+  const canAck = !s.serviceDown && (s.sound || s.display === "CRITICAL BACK");
+  $("ackrow").hidden = !(canAck || $("ackMsg").textContent);
+  $("ack").hidden = $("who").parentElement.hidden = !canAck;
+
+  // numbers: greyed out when they are not live
+  const stale = s.serviceDown || s.link !== "live";
+  document.querySelector(".numbers").style.opacity = stale ? "0.4" : "1";
+  $("ppm").textContent = s.ppm == null ? "--" : s.ppm.toLocaleString("en-CA");
+  $("ppmSub").textContent = s.ppm == null ? (s.cr1 === "FAULT" ? "No answer from the sensor" : "Scale 400 to 5,000 ppm")
+                          : s.ppm >= 5000 ? "Top of the sensor's scale: the real value may be higher"
+                          : s.ppm <= 400 ? "Bottom of the sensor's scale: suspect the sensor" : "Scale 400 to 5,000 ppm";
+  const CR1 = { "PRESENT": "Present", "ABSENT": "Absent", "WARMING UP": "Warming up", "FAULT": "Not trusted" };
+  $("cr1").textContent = CR1[s.cr1] || "--";
+  // absent is only red while it is an alarm; before the first breath it is simply the starting point
+  $("cr1").style.color = s.cr1 === "PRESENT" ? COLOUR.green
+    : s.cr1 === "ABSENT" ? ((s.alarm === "CRITICAL" || s.display === "CRITICAL") ? COLOUR.red : "var(--ink-2)")
+    : s.cr1 === "FAULT" ? COLOUR.cyan : "";
+  $("cr1Sub").textContent = s.cr1_since && s.server_time ? "since " + clock(s.cr1_since) + " (" + ago(s.server_time - s.cr1_since) + ")" : "";
+  if (stale && s.server_time && s.since_rx_s != null) {
+    $("ppmSub").textContent = "Last reading at " + clock(s.server_time - s.since_rx_s);
+  }
+
+  // this screen
+  $("fw").textContent = s.fw ? "firmware v" + s.fw : "firmware version not reported yet";
+  $("port").textContent = s.port || "--";
+  $("rawlog").textContent = s.raw_log || "nothing (replay)";
+  Sound.update(s.sound || null);
+}
+
+async function getJSON(url, opts) {
+  const ctl = new AbortController();
+  const timer = setTimeout(() => ctl.abort(), 2500);
+  try {
+    const r = await fetch(url, Object.assign({ signal: ctl.signal, cache: "no-store" }, opts || {}));
+    return await r.json();
+  } finally { clearTimeout(timer); }
+}
+
+async function poll() {
+  try {
+    const d = await getJSON("/api/latest");
+    lastOk = Date.now() / 1000;
+    lastData = d;
+    current = d;
+    const fresh = await getJSON("/api/readings?seconds=20");
+    mergePoints(fresh.points);
+  } catch (e) { /* render() turns this into NO SERVICE after 4 s */ }
+  render();
+  drawChart();
+}
+
+// ---------------------------------------------------------------------------------------------
+// The trend: CO2 in yellow, the state as a strip of colour underneath
+let points = [];             // [time, ppm, display]
+const WINDOW_S = 600;
+function mergePoints(list) {
+  const last = points.length ? points[points.length - 1][0] : 0;
+  for (const p of list) if (p[0] > last + 1e-6) points.push(p);
+  const cut = Date.now() / 1000 - WINDOW_S - 30;
+  while (points.length && points[0][0] < cut) points.shift();
+}
+
+function drawChart() {
+  const cv = $("chart"), dpr = window.devicePixelRatio || 1;
+  const W = cv.clientWidth, H = cv.clientHeight;
+  if (cv.width !== Math.round(W * dpr) || cv.height !== Math.round(H * dpr)) { cv.width = Math.round(W * dpr); cv.height = Math.round(H * dpr); }
+  const x = cv.getContext("2d");
+  x.setTransform(dpr, 0, 0, dpr, 0, 0);
+  x.clearRect(0, 0, W, H);
+  const L = 58, R = 12, T = 10, B = 44, RIB = 10;
+  const pw = W - L - R, ph = H - T - B;
+  const now = (current.server_time || Date.now() / 1000);
+  const t0 = now - WINDOW_S;
+  const X = (t) => L + ((t - t0) / WINDOW_S) * pw;
+  const Y = (v) => T + ph - ((Math.min(Math.max(v, 400), 5000) - 400) / 4600) * ph;
+  x.font = "13px " + getComputedStyle(document.body).fontFamily;
+  x.textBaseline = "middle";
+  // grid
+  for (const v of [1000, 2000, 3000, 4000, 5000]) {
+    x.strokeStyle = "#1d2830"; x.lineWidth = 1; x.setLineDash([]);
+    x.beginPath(); x.moveTo(L, Y(v) + 0.5); x.lineTo(L + pw, Y(v) + 0.5); x.stroke();
+    x.fillStyle = "#5d6c77"; x.textAlign = "right"; x.fillText(v.toLocaleString("en-CA"), L - 8, Y(v));
+  }
+  x.strokeStyle = "#2b3a44"; x.setLineDash([4, 4]);
+  x.beginPath(); x.moveTo(L, Y(400) + 0.5); x.lineTo(L + pw, Y(400) + 0.5); x.stroke();
+  x.setLineDash([]);
+  x.fillStyle = "#5d6c77"; x.textAlign = "right"; x.fillText("400", L - 8, Y(400));
+  // time axis: every 2 minutes
+  x.textAlign = "center"; x.textBaseline = "top";
+  const step = 120;
+  for (let t = Math.ceil(t0 / step) * step; t <= now; t += step) {
+    x.strokeStyle = "#141c22"; x.beginPath(); x.moveTo(X(t) + 0.5, T); x.lineTo(X(t) + 0.5, T + ph); x.stroke();
+    x.fillStyle = "#5d6c77"; x.fillText(hm(t), X(t), T + ph + RIB + 10);
+  }
+  // state strip
+  const vis = points.filter((p) => p[0] >= t0 - 2);
+  for (let i = 0; i < vis.length; i++) {
+    const a = vis[i], b = vis[i + 1];
+    const end = b && b[0] - a[0] < 5 ? b[0] : a[0] + 1;
+    const c = RIBBON[a[2]];
+    x.fillStyle = c ? COLOUR[c] : "#24313a";
+    x.globalAlpha = c ? 0.9 : 1;
+    x.fillRect(Math.max(X(a[0]), L), T + ph + 3, Math.max(X(end) - Math.max(X(a[0]), L), 1), RIB - 3);
+  }
+  x.globalAlpha = 1;
+  // CO2 trace
+  x.strokeStyle = "#ffd23f";
+  x.lineWidth = 2.2; x.lineJoin = "round";
+  x.beginPath();
+  let pen = false;
+  for (let i = 0; i < vis.length; i++) {
+    const [t, v] = vis[i];
+    const gap = i > 0 && t - vis[i - 1][0] > 5;
+    if (v == null || gap) { pen = false; if (v == null) continue; }
+    const px = X(t), py = Y(v);
+    if (px < L) continue;
+    if (!pen) { x.moveTo(px, py); pen = true; } else { x.lineTo(px, py); }
+  }
+  x.stroke();
+  // now marker
+  if (vis.length) {
+    const lastP = vis[vis.length - 1];
+    if (lastP[1] != null) {
+      x.fillStyle = "#ffd23f";
+      x.beginPath(); x.arc(X(lastP[0]), Y(lastP[1]), 4, 0, Math.PI * 2); x.fill();
+    }
+  } else {
+    x.fillStyle = "#5d6c77"; x.textAlign = "center"; x.textBaseline = "middle";
+    x.fillText("No readings yet", L + pw / 2, T + ph / 2);
+  }
+}
+
+// ---------------------------------------------------------------------------------------------
+// The alarm log
+const PRIORITY = { CRITICAL: ["Critical", "red"], ADVISORY: ["Advisory", "amber"], TECHNICAL: ["Technical", "cyan"] };
+function phoneText(msgs) {
+  const real = (msgs || []).filter((m) => m.kind !== "test");
+  if (!real.length) return "";
+  const names = (list) => [...new Set(list.map((m) => m.who || "someone"))].join(", ");
+  const sent = real.filter((m) => m.status === "sent");
+  const going = real.filter((m) => m.status === "queued" || m.status === "retrying");
+  const failed = real.filter((m) => m.status === "failed");
+  const held = real.filter((m) => (m.status || "").startsWith("not sent"));
+  const bits = [];
+  if (sent.length) bits.push("messaged " + names(sent));
+  if (going.length) bits.push("message on its way to " + names(going));
+  if (failed.length) bits.push("message to " + names(failed) + " failed");
+  if (held.length && !sent.length && !going.length && !failed.length) {
+    bits.push("no phone message (" + held[0].status.replace("not sent: ", "") + ")");
+  }
+  return bits.join("; ");
+}
+function showPhones(p) {
+  if (!p) return;
+  const dd = $("phones");
+  dd.textContent = "";
+  const link = document.createElement("a");
+  link.href = "/register";
+  if (p.mode === "--no-messages") {
+    dd.append("Off (--no-messages). ");
+    link.textContent = "Sign-up page";
+  } else {
+    dd.append(p.active ? p.active + (p.active === 1 ? " person gets" : " people get") + " alarm messages" + (p.mode === "replay" ? " (none during a replay)" : "") + ". " : "Nobody signed up yet. ");
+    link.textContent = p.active ? "Manage" : "Sign up";
+  }
+  dd.appendChild(link);
+  const f = (p.failed || [])[0];
+  $("phoneFail").hidden = !f;
+  if (f) $("phoneFail").textContent = "A message to " + (f.who || "someone") + " at " + hm(f.ts) + " could not be sent: " + (f.error || "no reason given") + ".";
+}
+async function pollAlarms() {
+  try {
+    const d = await getJSON("/api/alarms?limit=8");
+    showPhones(d.phones);
+    const ol = $("alarms");
+    ol.textContent = "";
+    if (!d.alarms.length) {
+      const li = document.createElement("li");
+      li.innerHTML = '<span class="empty">No alarms yet.</span>';
+      ol.appendChild(li);
+      return;
+    }
+    for (const a of d.alarms) {
+      const li = document.createElement("li");
+      const [label, col] = PRIORITY[a.priority] || [a.priority, "white"];
+      const t = document.createElement("span"); t.className = "t"; t.textContent = clock(a.raised);
+      const p = document.createElement("span"); p.className = "p"; p.textContent = label; p.style.setProperty("--c", COLOUR[col]);
+      const dsc = document.createElement("span"); dsc.className = "d";
+      const what = document.createElement("b");
+      what.textContent = a.source === "link" ? "No data from the monitor" : (a.reason || "");
+      dsc.appendChild(what);
+      const parts = [a.cleared ? "Lasted " + ago(a.cleared - a.raised) : "Still on"];
+      for (const k of a.acks) {
+        parts.push(k.method === "dashboard"
+          ? "acknowledged by " + k.who + " on the dashboard at " + clock(k.ts) + (k.confirmed ? "" : " (this screen only)")
+          : "acknowledged with the bedside button at " + clock(k.ts));
+      }
+      const phone = phoneText(a.messages);
+      if (phone) parts.push(phone);
+      dsc.appendChild(document.createTextNode(". " + parts.join("; ") + "."));
+      li.append(t, p, dsc);
+      ol.appendChild(li);
+    }
+  } catch (e) { /* the state poll reports a lost service */ }
+}
+
+// ---------------------------------------------------------------------------------------------
+// Acknowledge
+$("who").value = recall("co2-initials");
+$("who").addEventListener("change", () => remember("co2-initials", $("who").value.trim().toUpperCase()));
+$("ack").addEventListener("click", async () => {
+  const who = $("who").value.trim().toUpperCase();
+  if (!who) { $("ackMsg").textContent = "Type your initials first."; $("who").focus(); return; }
+  remember("co2-initials", who);
+  await Sound.enable();                 // any click is a chance to unlock sound
+  $("ack").disabled = true;
+  try {
+    askedAt = Date.now() / 1000;
+    const r = await getJSON("/api/ack", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ who }) });
+    $("ackMsg").textContent = r.message;
+    if (!r.ok) askedAt = null;
+  } catch (e) {
+    askedAt = null;
+    $("ackMsg").textContent = "Could not reach the laptop service. Acknowledge at the monitor's button.";
+  }
+  $("ack").disabled = false;
+  poll();
+  pollAlarms();
+});
+document.addEventListener("click", () => { if (!Sound.enabled() && Sound.ctx) Sound.enable(); });
+
+// ---------------------------------------------------------------------------------------------
+function frame() {
+  const t = performance.now() / 1000;
+  drawRing(t);
+  $("clock").textContent = clock(Date.now() / 1000);
+  requestAnimationFrame(frame);
+}
+async function start() {
+  showSoundState();
+  try {
+    const h = await getJSON("/api/readings?seconds=" + WINDOW_S);
+    points = h.points;
+  } catch (e) {}
+  poll();
+  pollAlarms();
+  setInterval(poll, 1000);
+  setInterval(pollAlarms, 3000);
+  window.addEventListener("resize", drawChart);
+  requestAnimationFrame(frame);
+}
+start();
+</script>
 </body>
 </html>

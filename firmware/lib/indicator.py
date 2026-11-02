@@ -6,6 +6,7 @@ Alarm states (lib/alarm.py), what code.py shows from v0.4 on; flash rates follow
     ADVISORY      amber, slow flash (0.6 Hz)
     CRITICAL      red, fast flash (2 Hz)
     CRITICAL ACK  red, steady (acknowledged, sound off)
+    CRITICAL BACK red and green in turn, 1 s each: CO2 is back, press the button to clear
     TECHNICAL     cyan, steady, with the Pico LED flickering
 CR-1 states (monitor v0.3, kept for reference): PRESENT green, ABSENT red, WARMING UP amber,
 FAULT cyan blinking.
@@ -25,6 +26,7 @@ DISPLAY = {                 # state: (colour, pattern)
     "ADVISORY": (AMBER, "slow"),
     "CRITICAL": (RED, "fast"),
     "CRITICAL ACK": (RED, "steady"),
+    "CRITICAL BACK": (RED, "alternate"),   # red, then green: see ring_frame
     "TECHNICAL": (CYAN, "steady"),
     "LAMP GREEN": (GREEN, "steady"),     # power-up lamp test
     "LAMP AMBER": (AMBER, "steady"),
@@ -50,7 +52,7 @@ def lit(pattern, now):
 
 def led_on(state, now):
     """Whether the Pico LED is lit for `state` at time `now` (seconds)."""
-    if state in ("PRESENT", "NORMAL", "CRITICAL ACK"):
+    if state in ("PRESENT", "NORMAL", "CRITICAL ACK", "CRITICAL BACK"):
         return True
     if state == "ABSENT":
         return (now % 2.0) < 0.12
@@ -70,6 +72,8 @@ def _pixel(colour):
 def ring_frame(state, now):
     colour, pattern = DISPLAY.get(state, ((0, 0, 0), "steady"))
     off = _pixel((0, 0, 0))
+    if pattern == "alternate":
+        return bytearray(_pixel(colour if (now % 2.0) < 1.0 else GREEN) * RING_PIXELS)
     if pattern == "spin":
         k = int(now / 0.12) % RING_PIXELS
         px = []

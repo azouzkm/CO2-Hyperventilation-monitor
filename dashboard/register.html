@@ -1,0 +1,288 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Phone alerts | Team 6 CO₂ monitor</title>
+<style>
+  :root {
+    --stage: #000000;
+    --panel: #0a1014;
+    --rule: #1d2830;
+    --ink: #e8eef2;
+    --ink-2: #93a3ae;
+    --ink-3: #5d6c77;
+    --green: #33d17a;
+    --amber: #ffb020;
+    --red: #ff4d4d;
+    --cyan: #2ed3f2;
+    --white: #dde4ea;
+    --num: "DIN Alternate", "DIN Condensed", "Barlow Condensed", "Roboto Condensed", "DejaVu Sans Condensed", "Arial Narrow", sans-serif;
+    --text: "Avenir Next", "Avenir", "Inter", "Segoe UI", system-ui, sans-serif;
+  }
+  * { box-sizing: border-box; }
+  [hidden] { display: none !important; }
+  html, body { margin: 0; background: var(--stage); color: var(--ink); }
+  body { font-family: var(--text); font-size: 16px; line-height: 1.5; }
+  button, input { font: inherit; }
+  :focus-visible { outline: 3px solid var(--white); outline-offset: 2px; }
+  a { color: var(--cyan); }
+
+  .bar { display: flex; align-items: baseline; gap: 24px; padding: 14px 28px; border-bottom: 1px solid var(--rule); }
+  .bar .ident { flex: 1; color: var(--ink-2); }
+  .bar .ident strong { color: var(--ink); font-weight: 600; margin-right: 10px; }
+
+  main { max-width: 760px; padding: 28px 28px 60px; }
+  h1 { font-family: var(--num); font-size: 48px; line-height: 1; margin: 0 0 12px; font-weight: 700; }
+  .lede { color: var(--ink-2); margin: 0 0 26px; max-width: 62ch; }
+  h2 { font-size: 19px; font-weight: 600; margin: 0 0 12px; }
+  section { border-top: 1px solid var(--rule); padding: 22px 0 26px; }
+
+  .rules { margin: 0; padding: 0; list-style: none; display: grid; gap: 10px; }
+  .rules li { display: grid; grid-template-columns: 7.5em 1fr; gap: 14px; }
+  .rules b { font-weight: 600; }
+  .rules b::before { content: ""; display: inline-block; width: 10px; height: 10px; border-radius: 50%; margin-right: 8px; background: var(--c); }
+  .rules span { color: var(--ink-2); }
+
+  .note { margin: 0 0 18px; padding: 12px 16px; background: #062c35; box-shadow: inset 5px 0 0 var(--cyan); }
+
+  form { display: grid; gap: 18px; }
+  fieldset { border: 0; margin: 0; padding: 0; }
+  legend { padding: 0; margin-bottom: 8px; color: var(--ink-2); }
+  .apps { display: flex; flex-wrap: wrap; gap: 8px; }
+  .apps label { position: relative; }
+  .apps input { position: absolute; opacity: 0; inset: 0; margin: 0; cursor: pointer; }
+  .apps span { display: block; padding: 9px 18px; border: 1px solid var(--ink-3); border-radius: 6px; color: var(--ink-2); }
+  .apps input:checked + span { border-color: var(--ink); color: var(--stage); background: var(--ink); font-weight: 600; }
+  .apps input:focus-visible + span { outline: 3px solid var(--white); outline-offset: 2px; }
+
+  .howto { background: var(--panel); border: 1px solid var(--rule); border-radius: 8px; padding: 14px 18px; }
+  .howto ol { margin: 0; padding-left: 1.3em; display: grid; gap: 6px; }
+  .howto .say { font-weight: 600; color: var(--ink); white-space: nowrap; }
+  .howto p { margin: 10px 0 0; color: var(--ink-2); }
+
+  .field { display: grid; gap: 6px; }
+  .field > span { color: var(--ink-2); }
+  .field small { color: var(--ink-3); }
+  input[type="text"], input[type="tel"] { width: 100%; max-width: 26em; padding: 10px 12px; border-radius: 6px; border: 1px solid var(--ink-3); background: var(--panel); color: var(--ink); }
+  .levels { display: grid; gap: 8px; }
+  .levels label, .consent { display: flex; gap: 10px; align-items: flex-start; }
+  .levels input, .consent input { margin-top: 5px; width: 18px; height: 18px; flex: none; accent-color: var(--white); }
+  .consent { padding: 12px 14px; border: 1px solid var(--rule); border-radius: 8px; }
+
+  .go { justify-self: start; padding: 12px 24px; border-radius: 8px; border: 2px solid var(--ink); background: var(--ink); color: var(--stage); font-weight: 700; cursor: pointer; }
+  .go:disabled { opacity: .5; cursor: default; }
+  .msg { margin: 0; min-height: 1.5em; }
+  .msg[data-ok="no"] { color: var(--amber); }
+  .msg[data-ok="yes"] { color: var(--green); }
+
+  #people { list-style: none; margin: 0; padding: 0; }
+  #people li { display: grid; grid-template-columns: 1fr auto; gap: 4px 18px; padding: 12px 0; border-top: 1px solid var(--rule); }
+  #people .who { font-weight: 600; }
+  #people .who em { font-style: normal; font-weight: 400; color: var(--ink-2); margin-left: 8px; }
+  #people .det { color: var(--ink-2); grid-column: 1; }
+  #people .last[data-status="failed"] { color: var(--amber); }
+  #people .acts { grid-column: 2; grid-row: 1 / span 2; display: flex; gap: 8px; align-items: center; }
+  #people .acts button { background: transparent; color: var(--ink); border: 1px solid var(--ink-3); border-radius: 6px; padding: 6px 12px; cursor: pointer; }
+  #people li[data-active="no"] .who, #people li[data-active="no"] .det { opacity: .55; }
+  #people .empty { display: block; color: var(--ink-3); border: 0; }
+
+  @media (max-width: 700px) {
+    .bar { flex-wrap: wrap; padding: 12px 16px; gap: 6px 18px; }
+    .bar .ident { flex-basis: 100%; }
+    main { padding: 22px 16px 48px; }
+    h1 { font-size: 38px; }
+    .rules li { grid-template-columns: 1fr; gap: 2px; }
+    #people li { grid-template-columns: 1fr; }
+    #people .acts { grid-column: 1; grid-row: auto; flex-wrap: wrap; }
+  }
+</style>
+</head>
+<body>
+<header class="bar">
+  <div class="ident"><strong>CO₂ ventilation monitor</strong>Team 6 bench prototype, not for patient use</div>
+  <a href="/">Back to the monitor</a>
+</header>
+<main>
+  <h1>Phone alerts</h1>
+  <p class="lede">Get the monitor's alarms as a message on your phone, through CallMeBot. No patient
+  information is ever sent, your number stays on this laptop, and you can stop the messages here at
+  any time.</p>
+
+  <section aria-labelledby="whenH">
+    <h2 id="whenH">When a message comes</h2>
+    <ul class="rules">
+      <li><b style="--c: var(--red)">Critical</b><span>At once. Again after 2 minutes if nobody has acknowledged it, and then the backups get it too.</span></li>
+      <li><b style="--c: var(--amber)">Advisory</b><span>If it lasts a minute.</span></li>
+      <li><b style="--c: var(--cyan)">Technical</b><span>If it lasts a minute: a sensor or link problem means the patient is not being watched.</span></li>
+      <li><b style="--c: var(--green)">Ended</b><span>One short message when an alarm you were told about is over.</span></li>
+    </ul>
+  </section>
+
+  <section aria-labelledby="signH">
+    <h2 id="signH">Sign up</h2>
+    <p class="note" id="mode" hidden></p>
+    <form id="form" novalidate>
+      <fieldset>
+        <legend>Your messaging app</legend>
+        <div class="apps">
+          <label><input type="radio" name="channel" value="whatsapp" checked><span>WhatsApp</span></label>
+          <label><input type="radio" name="channel" value="signal"><span>Signal</span></label>
+          <label><input type="radio" name="channel" value="telegram"><span>Telegram</span></label>
+        </div>
+      </fieldset>
+
+      <div class="howto" data-for="whatsapp">
+        <ol>
+          <li>Open <a href="https://www.callmebot.com/blog/free-api-whatsapp-messages/" target="_blank" rel="noopener">CallMeBot's WhatsApp page</a> and add the bot's number to your contacts.</li>
+          <li>From WhatsApp, send it: <span class="say">I allow callmebot to send me messages</span></li>
+          <li>It answers with your API key. Paste it below.</li>
+        </ol>
+        <p>If that page says the bot is full, choose Signal or Telegram instead.</p>
+      </div>
+      <div class="howto" data-for="signal" hidden>
+        <ol>
+          <li>Add <span class="say">+34 644 52 74 88</span> to your contacts (number from <a href="https://www.callmebot.com/blog/free-api-signal-send-messages/" target="_blank" rel="noopener">CallMeBot's Signal page</a>).</li>
+          <li>From Signal, send it: <span class="say">I allow callmebot to send me messages</span></li>
+          <li>It answers with your API key. Paste it below.</li>
+        </ol>
+      </div>
+      <div class="howto" data-for="telegram" hidden>
+        <ol>
+          <li>In Telegram, open <span class="say">@CallMeBot_txtbot</span> and send it <span class="say">/start</span> (more on <a href="https://www.callmebot.com/blog/telegram-text-messages/" target="_blank" rel="noopener">CallMeBot's Telegram page</a>).</li>
+          <li>No key needed: give your Telegram username below (Telegram, Settings, Username).</li>
+        </ol>
+      </div>
+
+      <label class="field"><span>Your name or initials</span><input type="text" name="name" maxlength="40" autocomplete="name" required></label>
+      <label class="field"><span>Role <small>(optional)</small></span><input type="text" name="role" maxlength="40" placeholder="Team 6"></label>
+      <label class="field" data-for="whatsapp signal"><span>Phone number, with the country code</span><input type="tel" name="phone" placeholder="+1 514 555 0123" autocomplete="tel"></label>
+      <label class="field" data-for="whatsapp signal"><span>API key from CallMeBot</span><input type="text" name="apikey" maxlength="64" autocomplete="off" spellcheck="false"></label>
+      <label class="field" data-for="telegram" hidden><span>Telegram username</span><input type="text" name="telegram" maxlength="33" placeholder="@yourname" autocomplete="off" spellcheck="false"></label>
+
+      <fieldset>
+        <legend>Which messages</legend>
+        <div class="levels">
+          <label><input type="radio" name="level" value="1" checked><span>Every alarm message</span></label>
+          <label><input type="radio" name="level" value="2"><span>Backup: only a critical alarm that nobody acknowledged within 2 minutes</span></label>
+        </div>
+      </fieldset>
+
+      <label class="consent"><input type="checkbox" name="consent"><span>I agree to receive alarm messages from this bench prototype on this number or account. I can stop them on this page at any time.</span></label>
+
+      <button class="go" type="submit" id="go">Sign up and send a test message</button>
+      <p class="msg" id="msg" role="status" aria-live="polite"></p>
+    </form>
+  </section>
+
+  <section aria-labelledby="peopleH">
+    <h2 id="peopleH">Who gets messages</h2>
+    <ol id="people"><li><span class="empty">Nobody yet.</span></li></ol>
+  </section>
+</main>
+
+<script>
+"use strict";
+const $ = (id) => document.getElementById(id);
+const form = $("form");
+const F = (n) => form.elements.namedItem(n);     // not form.name: that is the form's own name
+const pad = (n) => String(n).padStart(2, "0");
+function when(t) {
+  if (!t) return "";
+  const d = new Date(t * 1000), today = new Date();
+  const hm = pad(d.getHours()) + ":" + pad(d.getMinutes());
+  return d.toDateString() === today.toDateString() ? hm : d.toLocaleDateString("en-CA", { day: "numeric", month: "short" }) + " " + hm;
+}
+async function call(url, opts) {
+  const r = await fetch(url, Object.assign({ cache: "no-store" }, opts || {}));
+  return [r.status, await r.json()];
+}
+
+// the app choice shows its own instructions and fields
+function showApp() {
+  const app = F("channel").value;
+  document.querySelectorAll("[data-for]").forEach((el) => { el.hidden = !el.dataset.for.split(" ").includes(app); });
+}
+form.addEventListener("change", (e) => { if (e.target.name === "channel") showApp(); });
+
+form.addEventListener("submit", async (e) => {
+  e.preventDefault();
+  const body = {
+    name: F("name").value, role: F("role").value, channel: F("channel").value,
+    phone: F("phone").value, apikey: F("apikey").value, telegram: F("telegram").value,
+    level: Number(F("level").value), consent: F("consent").checked,
+  };
+  $("go").disabled = true;
+  try {
+    const [status, r] = await call("/api/users", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
+    $("msg").textContent = r.message;
+    $("msg").dataset.ok = status === 201 ? "yes" : "no";
+    if (status === 201) { F("apikey").value = ""; F("consent").checked = false; }
+  } catch (err) {
+    $("msg").textContent = "Could not reach the laptop service. Is tools/dashboard.sh still running?";
+    $("msg").dataset.ok = "no";
+  }
+  $("go").disabled = false;
+  load();
+});
+
+const STATUS = { sent: "sent", queued: "on its way", retrying: "trying again", failed: "could not be sent" };
+function lastText(last) {
+  if (!last) return "No message yet.";
+  const what = { test: "Test message", alarm: "Alarm message", escalation: "Escalation", resolved: "Follow-up" }[last.kind] || "Message";
+  const how = STATUS[last.status] || last.status;
+  return what + " " + when(last.ts) + ": " + how + (last.status === "failed" && last.error ? " (" + last.error + ")" : "") + ".";
+}
+
+async function act(id, what) {
+  try {
+    const [, r] = await call("/api/users/" + id + "/" + what, { method: "POST" });
+    $("msg").textContent = r.message;
+    $("msg").dataset.ok = r.ok ? "yes" : "no";
+  } catch (err) { $("msg").textContent = "Could not reach the laptop service."; $("msg").dataset.ok = "no"; }
+  load();
+}
+
+async function load() {
+  let d;
+  try { [, d] = await call("/api/users"); } catch (err) { return; }
+  const mode = $("mode");
+  mode.hidden = !d.mode;
+  mode.textContent = d.mode === "--no-messages"
+    ? "This service was started with --no-messages: nothing is sent to phones, not even a test."
+    : "This is a replay of a recorded session: it sends no alarm messages, but a test message still goes when you sign up.";
+  const ol = $("people");
+  ol.textContent = "";
+  if (!d.users.length) {
+    const li = document.createElement("li");
+    li.innerHTML = '<span class="empty">Nobody yet.</span>';
+    ol.appendChild(li);
+    return;
+  }
+  for (const u of d.users) {
+    const li = document.createElement("li");
+    li.dataset.active = u.active ? "yes" : "no";
+    const who = document.createElement("span"); who.className = "who"; who.textContent = u.name;
+    if (u.role) { const r = document.createElement("em"); r.textContent = u.role; who.appendChild(r); }
+    const det = document.createElement("span"); det.className = "det";
+    det.append(u.app + ", " + u.address + ". " + (u.level === 2 ? "Backup only" : "Every alarm message") + ". ");
+    det.append(u.active ? "Agreed " + when(u.optin_ts) + ". " : "Stopped " + when(u.optout_ts) + ". ");
+    const last = document.createElement("span"); last.className = "last";
+    last.dataset.status = u.last ? u.last.status : "";
+    last.textContent = lastText(u.last);
+    det.appendChild(last);
+    const acts = document.createElement("span"); acts.className = "acts";
+    const mk = (label, what) => { const b = document.createElement("button"); b.type = "button"; b.textContent = label; b.addEventListener("click", () => act(u.user_id, what)); return b; };
+    if (u.active) acts.append(mk("Send a test", "test"), mk("Stop messages", "stop"));
+    else acts.append(mk("Start again", "start"));
+    li.append(who, det, acts);
+    ol.appendChild(li);
+  }
+}
+
+showApp();
+load();
+setInterval(load, 5000);
+</script>
+</body>
+</html>

@@ -14,6 +14,12 @@ ABSENT   while PRESENT, the reading falls fast: at least ABSENT_DROP_FRAC of the
          A slow fall (hypoventilation) is too slow to trigger it; that is CR-4's job.
          Also ABSENT when the reading is back near where the rise started (within
          BACK_FRAC of the rise), so a small bump that fades slowly cannot stay PRESENT.
+         Both only once no new rise (RISE_TOL ppm or more) has come for QUIET_S seconds: once
+         air moves through the cell, each breath makes the reading swing up and down, and the
+         down-swing between two breaths is not an absence. Simulated (tests/test_cr1.py), a
+         swing of +/-100 ppm at 6 breaths/min made the earlier rule call ABSENT, and the alarm
+         CRITICAL, at every breath. On every bench reading so far it changes nothing: same calls,
+         same timing (one ABSENT on 25 Oct 1 s later).
 FAULT    no answer from the sensor, or a reading stuck at the bottom of the scale
          (400 ppm) for STUCK_S seconds, which is never room air. A single reading at the bottom
          of the scale is not used at all: on 22 Oct such readings were glitches, and as data they
@@ -45,6 +51,8 @@ FLOOR_PPM = 400
 STUCK_S = 30
 FALL_JUMP_PPM = 400       # real falls: at most 163 ppm/s; 22 Oct glitches: 1,006 to 4,600
 RISE_JUMP_PPM = 1200      # real rises: at most 654 ppm/s; 22 Oct glitches: 1,763 and 2,837
+QUIET_S = 12              # ABSENT only after this long with no new rise (one breath at 5/min) ...
+RISE_TOL = 25             # ... of this many ppm: the ripple of each breath is not an absence
 
 WARMING_UP = "WARMING UP"
 ABSENT = "ABSENT"
@@ -76,6 +84,18 @@ class PresenceMonitor:
     def _low(self, t, window):
         vals = [p for (s, p) in self.hist if s >= t - window]
         return min(vals) if vals else None
+
+    def _no_new_rise(self, t):
+        """True if no reading of the last QUIET_S seconds rose RISE_TOL above the lowest one
+        before it: no breath is still arriving."""
+        low = None
+        for s, p in self.hist:
+            if s < t - QUIET_S:
+                continue
+            if low is not None and p - low >= RISE_TOL:
+                return False
+            low = p if low is None else min(low, p)
+        return True
 
     def _high(self, t, window):
         vals = [p for (s, p) in self.hist if s >= t - window]
@@ -150,10 +170,10 @@ class PresenceMonitor:
         self.peak = ppm if self.peak is None else max(self.peak, ppm)
         if high is not None and self.base is not None:
             need = max(ABSENT_DROP_MIN, ABSENT_DROP_FRAC * (high - self.base))
-            if high - ppm >= need:
+            if high - ppm >= need and self._no_new_rise(t):
                 self.absent_low = [(t, ppm)]
                 return self._go(t, ABSENT, "fell %d ppm from %d in under %d s" % (high - ppm, high, DROP_WINDOW_S))
-            if ppm <= self.base + BACK_FRAC * (self.peak - self.base):
+            if ppm <= self.base + BACK_FRAC * (self.peak - self.base) and self._no_new_rise(t):
                 self.absent_low = [(t, ppm)]
                 return self._go(t, ABSENT, "back to %d ppm, near the %d it rose from" % (ppm, self.base))
         return False

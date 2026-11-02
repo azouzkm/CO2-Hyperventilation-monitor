@@ -14,7 +14,7 @@ ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, os.path.join(ROOT, "firmware", "lib"))
 
 import alarm  # noqa: E402
-from alarm import AlarmManager, STANDBY, NORMAL, CRITICAL, TECHNICAL  # noqa: E402
+from alarm import AlarmManager, STANDBY, NORMAL, ADVISORY, CRITICAL, TECHNICAL  # noqa: E402
 from cr1 import PresenceMonitor  # noqa: E402
 
 DATA = os.path.join(ROOT, "data", "2026-10-22_session2_readings.csv")
@@ -72,8 +72,48 @@ def test_critical_is_latched_until_the_button_even_if_co2_returns():
     steps = seq((0, 20, "PRESENT", 2000), (20, 40, "ABSENT", 900), (40, 60, "PRESENT", 2000))
     steps[50] = (50.0, "PRESENT", 2000, 1, 0)
     a, log = run(steps)
-    assert all(d == CRITICAL for t, d, _ in log if 20 <= t < 50)      # CO2 back at 40 s: still red
+    assert all(d == CRITICAL for t, d, _ in log if 20 <= t < 40)
+    # CO2 back at 40 s: still an alarm, shown red and green in turn until someone presses
+    assert all(d == "CRITICAL BACK" for t, d, _ in log if 40 <= t < 50)
+    banners = [act[1] for t, _, acts in log for act in acts if act[0] == "banner" and t == 40]
+    assert banners == ["ALARM CRITICAL: CO2 is back; press the button to clear the alarm"]
+    assert sounds(log, "critical") == [20.0, 30.0, 40.0]               # still sounding
     assert log[50][1] == NORMAL                                       # cleared by the press
+
+
+def test_acknowledged_then_co2_back_is_normal_without_a_second_press():
+    # The card's Figure 3: Critical -> Normal when "acknowledged and back in range". 1 Nov: the board
+    # asked for a second press after an acknowledged alarm, which the card does not ask for.
+    steps = seq((0, 20, "PRESENT", 2000), (20, 40, "ABSENT", 900), (40, 200, "PRESENT", 2000))
+    steps[30] = (30.0, "ABSENT", 900, 1, 0)                           # acknowledged at 30 s
+    a, log = run(steps)
+    assert log[35][1] == "CRITICAL ACK"
+    assert log[40][1] == NORMAL and all(d == NORMAL for t, d, _ in log if t >= 40)
+    assert any(act == ("banner", "ALARM CLEARED: acknowledged, and CO2 is back") for act in log[40][2])
+    assert not sounds(log, "critical")[1:]                            # one burst, then silence
+    # ... and if CO2 is lost again, a new CRITICAL
+    steps = seq((0, 20, "PRESENT", 2000), (20, 40, "ABSENT", 900), (40, 60, "PRESENT", 2000),
+                (60, 80, "ABSENT", 900))
+    steps[30] = (30.0, "ABSENT", 900, 1, 0)
+    a, log = run(steps)
+    assert log[60][1] == CRITICAL and 60.0 in sounds(log, "critical")
+
+
+def test_a_reading_stuck_at_the_top_is_technical_then_a_fall_is_critical_at_once():
+    def go(steps):
+        a = AlarmManager()
+        out = []
+        for t, co2, ppm, sat in steps:
+            acts = a.update(float(t), co2, "test", ppm, saturated=sat)
+            out.append((t, a.display(), acts))
+        return out
+    steps = ([(t, "PRESENT", 2000, False) for t in range(0, 20)] +
+             [(t, "PRESENT", 5000, t >= 50) for t in range(20, 90)] +
+             [(t, "ABSENT", 4700, False) for t in range(90, 100)])
+    log = go(steps)
+    assert log[49][1] == NORMAL and log[50][1] == TECHNICAL
+    assert any(a[0] == "banner" and "top of the scale" in a[1] for a in log[50][2])
+    assert log[90][1] == CRITICAL                                     # no grace period after it
 
 
 def test_equipment_problems_are_technical_never_critical():
@@ -121,6 +161,78 @@ def test_holding_the_button_stops_monitoring_until_a_new_breath():
     a, log = run(steps)
     assert all(d == STANDBY for t, d, _ in log if 45 <= t < 80)      # gas still there: no re-arm
     assert log[-1][1] == NORMAL                                       # a new breath at 80 s
+
+
+# ---- CR-4's advisory -----------------------------------------------------------------------------
+SLOW = "breathing rate 6/min, below 8/min, for 30 s"
+
+
+def run_adv(steps):
+    """steps: [(t, co2_state, ppm, short, advisory)]. Returns [(t, display, actions)]."""
+    a = AlarmManager()
+    log = []
+    for t, co2, ppm, short, adv in steps:
+        acts = a.update(t, co2, "test", ppm, short, 0, adv)
+        log.append((t, a.display(), acts))
+    return log
+
+
+def seq_adv(*parts):
+    """parts: (from_t, to_t, co2_state, ppm, advisory) -> one step per second."""
+    out = []
+    for t0, t1, co2, ppm, adv in parts:
+        out += [(float(t), co2, ppm, 0, adv) for t in range(t0, t1)]
+    return out
+
+
+def test_advisory_is_amber_with_3_pulses_every_20_s_then_normal_when_back_in_range():
+    log = run_adv(seq_adv((0, 100, "PRESENT", 2000, None), (100, 160, "PRESENT", 1500, SLOW),
+                          (160, 180, "PRESENT", 2000, None)))
+    assert all(d == ADVISORY for t, d, _ in log if 100 <= t < 160)
+    assert sounds(log, "advisory") == [100.0, 120.0, 140.0] and not sounds(log, "critical")
+    assert any(act == ("banner", "ALARM ADVISORY: " + SLOW) for act in log[100][2])
+    assert log[160][1] == NORMAL
+    assert any(act == ("banner", "ALARM NORMAL: back in range for 30 s") for act in log[160][2])
+
+
+def test_advisory_escalates_to_critical_when_co2_is_lost():
+    log = run_adv(seq_adv((0, 100, "PRESENT", 2000, None), (100, 130, "PRESENT", 1500, SLOW),
+                          (130, 160, "ABSENT", 900, None), (160, 170, "PRESENT", 2000, None)))
+    assert log[130][1] == CRITICAL                                    # the card's Advisory -> Critical
+    assert log[-1][1].startswith(CRITICAL)                            # latched, even with CO2 back
+
+
+def test_acknowledging_an_advisory_silences_it_for_two_minutes_and_keeps_it_amber():
+    steps = seq_adv((0, 100, "PRESENT", 2000, None), (100, 400, "PRESENT", 1500, SLOW))
+    steps[105] = (105.0, "PRESENT", 1500, 1, SLOW)                    # press at 105 s
+    log = run_adv(steps)
+    assert all(d == ADVISORY for t, d, _ in log if t >= 100)
+    pulses = sounds(log, "advisory")
+    assert pulses[0] == 100.0 and not [t for t in pulses if 105 < t < 105 + alarm.SILENCE_S]
+    assert [t for t in pulses if t >= 105 + alarm.SILENCE_S]          # then it sounds again
+    assert any(act[0] == "banner" and act[1].startswith("ADVISORY ACKNOWLEDGED") for act in log[105][2])
+
+
+def test_a_new_advisory_after_an_acknowledged_one_sounds_at_once():
+    steps = seq_adv((0, 100, "PRESENT", 2000, None), (100, 110, "PRESENT", 1500, SLOW),
+                    (110, 140, "PRESENT", 2000, None), (140, 150, "PRESENT", 1500, SLOW))
+    steps[102] = (102.0, "PRESENT", 1500, 1, SLOW)
+    log = run_adv(steps)
+    assert 140.0 in sounds(log, "advisory")
+
+
+def test_a_sensor_fault_during_an_advisory_is_technical():
+    log = run_adv(seq_adv((0, 100, "PRESENT", 2000, None), (100, 120, "PRESENT", 1500, SLOW),
+                          (120, 130, "FAULT", None, None)))
+    assert all(d == TECHNICAL for t, d, _ in log if t >= 120) and not sounds(log, "critical")
+
+
+def test_acknowledging_a_critical_alarm_with_an_advisory_standing_goes_to_advisory():
+    steps = seq_adv((0, 20, "PRESENT", 2000, None), (20, 40, "ABSENT", 900, None),
+                    (40, 60, "PRESENT", 1500, SLOW))
+    steps[50] = (50.0, "PRESENT", 1500, 1, SLOW)
+    log = run_adv(steps)
+    assert log[49][1].startswith(CRITICAL) and log[50][1] == ADVISORY
 
 
 # ---- the 22 Oct readings through CR-1 and the alarm ---------------------------------------------

@@ -51,6 +51,18 @@ squeeze it with the outlet open: the reading should start rising within a few se
   (for example with a printed Venturi that mixes in a fixed share of room air) is a team decision;
   this tray and lid work either way.
 
+## Version 1 as printed (25 Oct 2026)
+
+- All three parts printed and used. Photos: `docs/photos/2026-10-25_*.jpg`; how the lid closes:
+  `flowcell_closing_steps.png`.
+- **Barbs:** the oxygen tubing was not a good fit on any of the coupon's five barbs, but sits firmly
+  and correctly on the lid's 5.6 mm barbs, so `BARB_RIDGE` stays 5.6.
+- **Lid** drops into the ledge as designed. Sealed with electrical tape on the seam and the notch;
+  the leak test passed.
+- **For version 2:** move the inlet barb about 3.5 mm across the width so it sits squarely over the
+  white filter. Decide on airflow first: a sealed cell holds the last breath, which read as CO2
+  present with nobody breathing (lab notebook, 25 Oct). A pump, or a flush port, changes the lid.
+
 ## Measurements for version 2
 
 Change these numbers at the top of `make_parts.py`, then run `python3 hardware/cad/make_parts.py`
