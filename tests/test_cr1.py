@@ -156,6 +156,33 @@ def test_slow_fall_stays_present_for_cr4_to_judge():
     assert [s for _, s, _ in ch] == [ABSENT, PRESENT], ch
 
 
+def breathing_with_ripple(mon, t0, seconds, rate, swing, level=2000, room=900):
+    """Feed the level rising from room air to `level`, with a +/-swing ripple at `rate` breaths/min
+    (as seen once air moves through the cell). Returns the CR-1 states called, and the end time."""
+    calls = []
+    for k in range(seconds):
+        t = t0 + k
+        rise = level - (level - room) * math.exp(-k / 8.0)
+        ppm = int(rise + swing * math.sin(2 * math.pi * rate * k / 60.0) * min(1.0, k / 20.0))
+        if mon.update(float(t), ppm):
+            calls.append((t, mon.state))
+    return calls, t0 + seconds
+
+
+def test_the_swing_of_each_breath_is_not_an_absence():
+    for rate, swing in ((4, 150), (6, 120), (10, 100), (15, 60)):
+        mon = PresenceMonitor(warmup_s=0)
+        feed(mon, lambda t: 900, 0, 60)
+        calls, end = breathing_with_ripple(mon, 60, 300, rate, swing)
+        assert calls and calls[0][1] == PRESENT and len(calls) == 1, (rate, calls)
+        # then the line comes off: the reading falls back to room air, and ABSENT follows in time
+        last = 2000
+        for k in range(60):
+            if mon.update(float(end + k), int(900 + (last - 900) * math.exp(-k / 20.0))):
+                break
+        assert mon.state == ABSENT and k <= 30, (rate, k, mon.reason)
+
+
 def test_no_answer_is_a_fault_then_a_re_warm_then_absent():
     mon = PresenceMonitor()
     seq = [500] * 80 + [820] * 20 + [None] * 5 + [820] * (cr1.RECOVERY_S + 10)

@@ -11,9 +11,9 @@
 #   ER-2  CO2 ABSENT  shown within 30 s of the stop cue
 # and appended to data/runs/results.csv.
 #
-# Before you start: the board is plugged in and past warm-up (its LED blinks briefly every 2 s =
-# ABSENT), the test lung is ready, and nobody is within 1 m of the sensor. Close live_co2.sh,
-# Thonny or Mu first: only one program can hold the serial port.
+# Before you start: the board is plugged in and past warm-up (the ring circles white and the
+# line shows ABSENT), the test lung is ready, and nobody is within 1 m of the sensor. Close the
+# dashboard, live_co2.sh, Thonny or Mu first: only one program can hold the serial port.
 
 RATE=15          # breaths per minute
 BREATHS=15       # cues to give
@@ -58,7 +58,7 @@ speak() { (say "$*" >/dev/null 2>&1 || afplay /System/Library/Sounds/Tink.aiff >
 state_now() { grep -E '^[0-9:]+  t= *[0-9]+ s ' "$LOG" | tail -n 1 | sed -nE 's/.*\| +(WARMING UP|ABSENT|PRESENT|FAULT).*/\1/p'; }
 
 if ! exec 3<>"$PORT"; then
-  echo "Could not open $PORT. Is another program (live_co2.sh, Thonny, Mu) using it?"
+  echo "Could not open $PORT. Is another program (the dashboard, live_co2.sh, Thonny, Mu) using it?"
   exit 1
 fi
 stty -f "$PORT" raw -echo 2>/dev/null

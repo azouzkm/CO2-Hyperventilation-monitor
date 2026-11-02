@@ -38,3 +38,15 @@ open-air bench (no cap or sampling line yet). Source: `data/raw/co2_2026-10-22_0
 
 The firmware was reloaded six times during the session (00:39:45 to 00:57:56) while it was being
 updated; readings continue across those restarts, but on-board event summaries near them are partial.
+
+## Session 3 raw logs (25 Oct 2026)
+
+First readings through the printed flow-cell (sealed, no airflow through it), and the alarm test.
+No labelled CSV: these were set-up and exploratory runs, not counted ones. What happened when is in
+the lab notebook (`docs/lab-notebook.md`, session 3).
+
+| Log | Mac clock | Firmware | What |
+| --- | --- | --- | --- |
+| `raw/co2_2026-10-25_000608.log` | 00:06-00:30 | v0.3 | First breaths through the tube (00:15:00) and flushes (00:16:02) |
+| `raw/co2_2026-10-25_003225.log` | 00:32-00:47 | v0.3, light ring | Breath at 00:32:58 (fastest real rise, 654 ppm/s); false PRESENT from trapped gas at 00:38:35 |
+| `raw/co2_2026-10-25_011421.log` | 01:14-02:04 | Speaker and button, then v0.4 from 01:39:43 | Button checks; the alarm test from 01:46 (breath, flush, button, pulled data wire, re-warm, hold) |

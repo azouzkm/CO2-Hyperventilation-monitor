@@ -48,6 +48,8 @@ class EventDetector:
         window = [p for _, p in pts]
         if max(window) - min(window) > self.stable_ppm:
             return None
+        if max(window) >= TOP_PPM:            # pinned at the top of the scale: not a room level
+            return None
         # least-squares slope over the window: a slow tail can look flat over a few seconds
         n = len(pts)
         mt = sum(t for t, _ in pts) / n

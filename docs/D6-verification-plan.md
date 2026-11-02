@@ -1,8 +1,8 @@
 # D6 · Verification plan (DRAFT, CR-1 first)
 
-Status: draft, 22 Oct 2026. CR-1 is written out first; CR-2 to CR-4 follow the same pattern once
-their ERs are drafted (`docs/D1-engineering-requirements.md`). For each ER: method, apparatus,
-sample size, acceptance criterion and who signs it off.
+Status: draft, 22 Oct 2026; CR-4 (ER-7, ER-8) added 27 Oct. CR-2 and CR-3 follow the same pattern
+once their ERs are drafted (`docs/D1-engineering-requirements.md`). For each ER: method,
+apparatus, sample size, acceptance criterion and who signs it off.
 
 ## Apparatus: the bench rig
 
@@ -14,7 +14,8 @@ sample size, acceptance criterion and who signs it off.
 | Water trap | Kit item, or a printed one | Asked for |
 | Flow-cell | `hardware/cad/` v1 tray and lid on the MH-Z19C, seams taped | Ready to print |
 | Monitor | Pico 2 W, firmware v0.3 (`lib/cr1.py`) | Laptop-tested; load next session |
-| Run control | Mac running `tools/scripted_run.sh` (spoken cues, log, scoring) | Written; first try on the Mac next session |
+| Run control | Mac running `tools/scripted_run.sh` (CR-1) and `tools/rate_run.sh` (CR-4): spoken cues, log, scoring | Written; first try on the Mac next session (`rate_run.sh` checked against a simulated board) |
+| Airflow | A pump on the flow-cell outlet, or room-air flushes, with the sample diluted below 5,000 ppm | Needed for CR-4: asked the instructor about the pump |
 | Reference | Sim-lab capnograph: calibration and validation only, never a live channel | To book |
 
 ## CR-1 · ER-1 (present within 3 breaths) and ER-2 (absent within 30 s)
@@ -49,6 +50,39 @@ Both ERs are measured in the same scripted run.
 **Before the rig exists:** replaying the 22 Oct open-air readings through the v0.3 logic gives
 PRESENT during breath 3 (11 s) and ABSENT 17 s after the last breath (`tests/test_cr1.py`). That is
 a design check, not verification.
+
+## CR-4 · ER-7 (breathing rate) and ER-8 (advisory on a sustained fall)
+
+Both are measured in the same paced runs. `tools/rate_run.sh` speaks one cue per breath through a
+plan of phases ("rate:seconds") and scores the run with `tools/score_rate_run.py`.
+
+| | ER-7 | ER-8 (a), slow breathing | ER-8, specificity |
+| --- | --- | --- | --- |
+| Method | Paced phases; the rate the board shows (the "RR" column) is compared with the paced rate from 50 s into each phase to its end | Plan 15 → 6 → 15/min: seconds from the start of the slow phase to the ADVISORY banner, and to NORMAL after it | Steady breathing at 12/min for 10 min: count the advisories |
+| Sample size | 5 runs at each of 6, 10, 15 and 20/min (plans `6:180`, `10:180`, `15:180`, `20:180`) | 10 runs of the default plan (`15:150,6:150,15:120`) | 5 runs (plan `12:600`) |
+| Acceptance | In every phase: a rate shown at least 80 % of the scored time, median within ±1/min (or ±10 %), no value below 80 % of the paced rate | Advisory within 90 s in 10 of 10, back to NORMAL within the last phase | No advisory in 5 of 5 |
+| Evidence | `data/runs/rate_results.csv` and the run logs `data/raw/rate_*.log` | Same | Same |
+| Signed off by | Requirements and verification lead | Same | Same |
+
+**Procedure**
+
+1. Rig as for CR-1, with air moving through the flow-cell (pump or flushes) and the sample diluted
+   below 5,000 ppm: in the sealed cell of 25 Oct no rhythm reached the sensor.
+2. Wait for ABSENT. Nobody else within 1 m.
+3. Run, for example, `bash tools/rate_run.sh --plan 15:150,6:150,15:120 --cue squeeze --label slow-runNN`.
+   Squeeze the bag (or breathe out) on every cue; the first cue of a phase says "slower" or "faster".
+4. The tool records 60 s after the stop and prints, for each phase, the rate shown, ER-7, and the
+   advisory or the return to NORMAL (ER-8).
+5. Note any deviation (a missed or doubled breath, a bag refill) in the lab notebook against the label.
+
+**ER-8 (b), a slow fall of CO2:** no way yet to make a controlled fall of the CO2 level on the
+bench. Until there is one (for example a known dilution step), it is checked by replaying recorded
+readings and by simulation (`tests/test_cr4.py`), and reported as a design check, not verification.
+
+**Before the rig has airflow:** the 22 Oct open-air paced run reads 15.0–15.7/min, and nothing in
+2.8 h of other readings shows a rate or an advisory (`tests/test_cr4.py`). A dry run of the board
+program on simulated breathing passes all three phases of the default plan (`tests/test_rate_run.py`).
+Design checks, not verification.
 
 ## Open items
 

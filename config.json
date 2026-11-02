@@ -1,5 +1,6 @@
 {
   "_comment": "Threshold config shared by the firmware and the service. Both read the same file so the device and the dashboard can never disagree about what counts as an alarm (stressed in the worked example's Marker's note). Values are placeholders — fill in real values after calibration.",
+  "_status": "Read today by the laptop service only: technical_timeout_s, and the service and notify blocks. The board still keeps its CR-1 and alarm numbers in firmware/lib/cr1.py and firmware/lib/alarm.py, and it decides every alarm itself; the service mirrors it.",
 
   "sample_interval_s": 0.2,
   "sample_rate_hz": 5.0,
@@ -15,5 +16,25 @@
   "breathing_rate_fall_bpm": 6,
 
   "critical_latched": true,
-  "technical_timeout_s": 10.0
+  "technical_timeout_s": 5.0,
+  "_technical_timeout_s": "Seconds without a line from the board before the service raises a Technical alarm (link lost). The board sends one reading per second; in the 25 Oct alarm test replayed through the service, the only gaps longer than 5 s were the two firmware reloads.",
+
+  "service": {
+    "http_port": 8000,
+    "silence_s": 120,
+    "history_s": 600,
+    "db_path": "data/co2monitor.sqlite",
+    "raw_log_dir": "data/raw",
+    "_comment": "silence_s: an acknowledgement silences the tone for 2 minutes (workshop slide 11). history_s: how much of the trend the dashboard shows. The database and the raw logs stay on this laptop; git ignores the database."
+  },
+
+  "notify": {
+    "advisory_after_s": 60,
+    "technical_after_s": 60,
+    "escalate_after_s": 120,
+    "retry_s": [10, 30],
+    "send_resolved": true,
+    "max_per_10_min": 10,
+    "_comment": "Messages to phones through CallMeBot (workshop slide 11): Critical at once, and again at escalate_after_s to the backups too if nobody has acknowledged it; Advisory and Technical if they last a minute; one follow-up when an alarm someone received ends. A message is tried again after 10 s and 30 s when CallMeBot cannot be reached. At most max_per_10_min messages per person in 10 minutes."
+  }
 }

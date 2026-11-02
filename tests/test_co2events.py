@@ -172,6 +172,8 @@ class _Done(Exception):
 RING_FRAMES = []   # (time, bytes) written to the light ring during the last dry run
 TONES = []         # (time, frequency or 0) sent to the speaker during the last dry run
 BUTTON_DOWN = []   # (from, to) times when the simulated button is held down
+TYPED = []         # (time, text) the simulated laptop sends to the board, e.g. (300.0, "ACK\n")
+LINE_OFF = []      # (from, to) times when the simulated safety clip is open (tube off)
 
 
 def _dry_run(sensor_fn, start, stop):
@@ -185,7 +187,7 @@ def _dry_run(sensor_fn, start, stop):
     fake_time.sleep = clock.sleep
     fake_board = types.ModuleType("board")
     fake_board.LED = "LED"
-    fake_board.GP16, fake_board.GP18, fake_board.GP20 = "GP16", "GP18", "GP20"
+    fake_board.GP16, fake_board.GP18, fake_board.GP20, fake_board.GP21 = "GP16", "GP18", "GP20", "GP21"
     fake_pwmio = types.ModuleType("pwmio")
 
     class PWMOut:
@@ -217,6 +219,8 @@ def _dry_run(sensor_fn, start, stop):
         def value(self):
             if self.pin == "GP20":   # button: pulled up, low while held down
                 return not any(a <= clock.now < b for a, b in BUTTON_DOWN)
+            if self.pin == "GP21":   # safety clip: pulled up, low while the loop is closed
+                return any(a <= clock.now < b for a, b in LINE_OFF)
             return self._value
 
         @value.setter
@@ -239,10 +243,29 @@ def _dry_run(sensor_fn, start, stop):
     fake_mhz.read_co2 = fake_read
     fake_mhz.probe = lambda idle=None: ("normal", fake_read("normal", idle))
 
-    saved = {k: sys.modules.get(k) for k in ("time", "board", "digitalio", "mhz19c", "neopixel_write", "pwmio")}
+    # the laptop's side of the USB link: text in TYPED arrives at its time, one character at a time
+    pending = [c for when, text in sorted(TYPED) for c in [(when, ch) for ch in text]]
+
+    class _Runtime:
+        @property
+        def serial_bytes_available(self):
+            return sum(1 for when, _ in pending if when <= clock.now)
+
+    class _Stdin:
+        def read(self, n=1):
+            when, ch = pending.pop(0)
+            return ch
+
+    fake_supervisor = types.ModuleType("supervisor")
+    fake_supervisor.runtime = _Runtime()
+    real_stdin = sys.stdin
+    sys.stdin = _Stdin()
+
+    saved = {k: sys.modules.get(k) for k in ("time", "board", "digitalio", "mhz19c", "neopixel_write", "pwmio",
+                                              "supervisor")}
     sys.modules.update(time=fake_time, board=fake_board, digitalio=fake_dio, mhz19c=fake_mhz,
-                       neopixel_write=fake_npw, pwmio=fake_pwmio)
-    for k in ("indicator", "cr1", "annunciator"):   # re-import against this run's fake clock
+                       neopixel_write=fake_npw, pwmio=fake_pwmio, supervisor=fake_supervisor)
+    for k in ("indicator", "cr1", "annunciator", "lineclip"):   # re-import against this run's fake clock
         sys.modules.pop(k, None)
     lines = []
     import builtins
@@ -256,6 +279,7 @@ def _dry_run(sensor_fn, start, stop):
             pass
     finally:
         builtins.print = real_print
+        sys.stdin = real_stdin
         for k, v in saved.items():
             if v is None:
                 sys.modules.pop(k, None)
@@ -366,10 +390,112 @@ def test_red_keeps_flashing_and_beeping_while_the_sensor_is_silent():
         return int(first_order(t, 200, 260, 830, 6000, 12.0, 40.0))
     lines = _dry_run(sensor, 5.0, 380.0)
     text = "\n".join(lines)
-    assert ">>> ALARM CRITICAL stays; also a sensor problem" in text
+    assert ">>> ALARM CRITICAL stays; also an equipment problem" in text
     during = [buf for t, buf in RING_FRAMES if 337 <= t < 363]
     assert len(set(during)) == 2 and len(during) >= 40, len(during)   # red / off, 2 flashes a second
     assert sum(1 for t, f in TONES if 337 <= t < 363 and f == 2400) >= 10   # bursts carry on
+
+
+def test_ring_alternates_red_and_green_while_co2_is_back():
+    import importlib
+    added = "digitalio" not in sys.modules
+    if added:                                   # indicator.py imports it; not needed for frames
+        sys.modules["digitalio"] = types.SimpleNamespace()
+    try:
+        sys.modules.pop("indicator", None)
+        ind = importlib.import_module("indicator")
+        red, green = ind.ring_frame("LAMP RED", 0.0), ind.ring_frame("LAMP GREEN", 0.0)
+        frames = [bytes(ind.ring_frame("CRITICAL BACK", k * 0.25)) for k in range(8)]
+        assert frames[:4] == [bytes(red)] * 4 and frames[4:] == [bytes(green)] * 4
+    finally:
+        sys.modules.pop("indicator", None)
+        if added:
+            sys.modules.pop("digitalio", None)
+
+
+def test_code_py_a_cell_stuck_at_the_top_is_cyan_not_green():
+    # 1 Nov, 19:25-19:31: firm breaths filled the sealed cell, the reading sat at 5,000 ppm for 6
+    # minutes with the tube on the table, and the ring stayed green. Now: cyan after 30 s at the top,
+    # and red at once when the reading finally falls.
+    def sensor(t):
+        if t < 75:
+            return 500
+        if t < 150:
+            return 1500
+        if t < 160:
+            return 1500 + 400 * int(t - 150)
+        if t < 500:
+            return 5000
+        return max(1500, int(5000 - 30 * (t - 500)))
+    lines = _dry_run(sensor, 5.0, 560.0)
+    text = "\n".join(lines)
+    tech = [ln for ln in lines if ln.startswith("t=") and "TECHNICAL" in ln]
+    assert tech, text[-800:]
+    first = int(tech[0][2:7])
+    assert 185 <= first <= 195, first                     # about 30 s after the reading hit the top
+    assert ">>> ALARM TECHNICAL: reading at the top of the scale (5,000 ppm) for 30 s" in text
+    assert not [ln for ln in lines if ln.startswith("t=") and 200 <= int(ln[2:7]) < 500 and "NORMAL" in ln]
+    crit = [ln for ln in lines if ln.startswith(">>> ALARM CRITICAL: CO2 lost")]
+    assert crit, text[-800:]
+
+
+def test_a_reading_pinned_at_the_top_is_not_a_room_level():
+    # 25 Oct: the board printed "room level: 5000 ppm ... ready for a test" with the cell full
+    det = EventDetector()
+    for t in range(60):
+        det.update(float(t), TOP_PPM)
+    assert det.room_level() is None and det.armed is None
+
+
+def _json_lines(lines):
+    import json
+    return [json.loads(ln) for ln in lines if ln.startswith("{")]
+
+
+def test_every_reading_also_goes_out_as_one_json_line():
+    # IF-6: the laptop service reads one JSON object per line; the human line stays as it was
+    def sensor(t):
+        if t < 75:
+            return 500
+        if 300 <= t < 304:
+            return None                                    # a short sensor drop-out
+        return int(first_order(t, 200, 260, 830, 6000, 12.0, 40.0))
+    lines = _dry_run(sensor, 5.0, 330.0)
+    js = _json_lines(lines)
+    readings = [ln for ln in lines if ln.startswith("t=")]
+    assert len(js) == len(readings) and len(js) > 250
+    keys = {"v", "t", "ppm", "cr1", "cr1_why", "alarm", "show", "why", "acked", "latched", "press", "hold",
+            "dash_ack", "rr", "rr_why", "advisory", "line"}
+    assert all(set(j) == keys and j["v"] == "0.6" for j in js)
+    assert all(j["line"] is True and j["advisory"] is None for j in js)   # clip closed, no fall
+    for j, ln in zip(js, readings):                         # the two lines say the same thing
+        assert ln.startswith("t=%5d s" % j["t"])
+        assert (j["ppm"] is None) == ("no answer" in ln)
+        if j["ppm"] is not None:
+            assert "CO2 %5d ppm" % j["ppm"] in ln
+        assert j["cr1"] in ln and j["show"] in ln
+    assert any(j["ppm"] is None and j["cr1"] == "FAULT" for j in js)
+    assert js[-1]["alarm"] == "CRITICAL" and js[-1]["show"] == "CRITICAL" and not js[-1]["acked"]
+
+
+def test_ack_from_the_dashboard_acknowledges_like_the_button():
+    def sensor(t):
+        if t < 75:
+            return 500
+        return int(first_order(t, 200, 260, 830, 6000, 12.0, 40.0))
+    TYPED[:] = [(320.0, "ACK\n")]
+    try:
+        lines = _dry_run(sensor, 5.0, 340.0)
+    finally:
+        TYPED[:] = []
+    text = "\n".join(lines)
+    assert ">>> ACK from the dashboard <<<" in text and ">>> BUTTON pressed <<<" not in text
+    assert ">>> ALARM ACKNOWLEDGED: sound off for 120 s <<<" in text
+    js = _json_lines(lines)
+    acked_at = [j["t"] for j in js if j["dash_ack"]]
+    assert len(acked_at) == 1 and 320 <= acked_at[0] <= 322
+    assert all(j["acked"] and j["show"] == "CRITICAL ACK" for j in js if j["t"] > acked_at[0])
+    assert all(j["press"] == 0 for j in js)
 
 
 def test_start_up_chirp_and_button_beep():

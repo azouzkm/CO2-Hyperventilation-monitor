@@ -1,0 +1,34 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Project 6 — CO2 Monitor</title>
+  <style>
+    body { font-family: system-ui, sans-serif; margin: 24px; background: #111; color: #eee; }
+    #banner { font-size: 2rem; font-weight: bold; padding: 16px; border-radius: 8px; text-align: center; }
+    #banner.normal    { background: #0a0; color: #000; }
+    #banner.advisory  { background: #fb0; color: #000; }
+    #banner.critical  { background: #d00; color: #fff; }
+    #banner.technical { background: #0bb; color: #000; }
+  </style>
+</head>
+<body>
+  <div id="banner" class="normal">NORMAL</div>
+  <p>CO2: <span id="co2">--</span> %</p>
+  <!-- TODO: draw the live trace with Chart.js/Plotly, polling /api/latest at 1 Hz -->
+  <script>
+    async function poll() {
+      try {
+        const r = await fetch('/api/latest');
+        const d = await r.json();
+        document.getElementById('co2').textContent = d.co2_pct;
+        document.getElementById('banner').className = d.state;
+        document.getElementById('banner').textContent = d.state.toUpperCase();
+      } catch (e) { /* stay silent when the service is down */ }
+    }
+    setInterval(poll, 1000);
+    poll();
+  </script>
+</body>
+</html>

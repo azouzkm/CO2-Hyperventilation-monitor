@@ -2,6 +2,24 @@
 
 This folder is an exact copy of what belongs on the Pico's `CIRCUITPY` drive.
 
+> **1 Nov:** **v0.6, breathing rate (CR-4) and the safety clip (CR-3).** Each line now ends in the
+> breathing rate ("RR 15.2", or "RR --" when it cannot be resolved, with the reason in a banner), and
+> the ADVISORY state works: breathing below 8/min (or 40 % below the patient's own rate), or the
+> breath-averaged CO2 30 % below its own level, for 30 s. The safety clip on the sampling line
+> (GP21 to GND) makes a disconnected tube TECHNICAL "LINE OFF" within about a second, never CRITICAL
+> (tested at the bench 1 Nov). A reading stuck at the top of the scale (5,000 ppm) for 30 s is
+> TECHNICAL, since the sensor can then not see breaths (1 Nov: a sealed cell full of breath showed
+> green for 6 minutes with nobody breathing). A CRITICAL alarm now ends once it is acknowledged and
+> CO2 is back, in either order (the card's Figure 3). CR-1 waits 12 s without a new rise before
+> calling CO2 absent, so the swing of each breath through a ventilated cell is not an absence. The
+> JSON line adds `rr`, `rr_why`, `advisory` and `line`.
+>
+> **26 Oct:** **v0.5, the link to the dashboard.** Each reading now also goes out as one JSON line
+> (interface IF-6) for the laptop service, next to the text line, and the board accepts the
+> dashboard's acknowledge over USB (`ACK`), handled exactly like a short press of its button. The
+> light, the sound, the button and every alarm rule are unchanged, and the board still decides
+> every alarm itself. Only `code.py` changed.
+>
 > **25 Oct:** **v0.4, the test alarm.** The four alarm states of the project card (Figure 3) now
 > drive the light ring and the speaker, and the button acknowledges or stops them. CR-1 also
 > catches the 22 Oct sensor glitches at their first impossible reading, so a failing sensor can
@@ -12,18 +30,22 @@ This folder is an exact copy of what belongs on the Pico's `CIRCUITPY` drive.
 | File | Purpose |
 | --- | --- |
 | `boot.py` | Runs once at power-up: asks the sensor for one CO2 reading and writes the result to `boot_out.txt` on the drive |
-| `code.py` | Main program, **monitor v0.4**: one reading per second with a bar, the CR-1 state and the alarm state, a `>>>` banner at every change, and the response timing of each CO2 event |
+| `code.py` | Main program, **monitor v0.6**: one reading per second with a bar, the CR-1 state, the alarm state and the breathing rate, a `>>>` banner at every change, and the response timing of each CO2 event; the same reading as one JSON line for the laptop service, and the dashboard's `ACK` |
 | `lib/cr1.py` | CR-1: WARMING UP → ABSENT ⇄ PRESENT, plus FAULT. Present = a fresh rise of 100 ppm; absent = a fast fall from the recent peak, or back near where the rise started |
 | `lib/alarm.py` | The alarm states on top of CR-1: STANDBY, NORMAL, ADVISORY, CRITICAL, TECHNICAL, and the button rules |
+| `lib/cr4.py` | CR-4: the breathing rate from the rhythm of the CO2 signal (every 2 s over 64 s; shown only when it can be backed, never a falsely low rate) and the ADVISORY on a sustained fall |
+| `lib/lineclip.py` | CR-3: the safety clip on the sampling line (GP21, pull-up; loop open = tube off), debounced 0.3 s |
 | `lib/indicator.py` | Light ring (D16 / GP16) and the Pico's LED: colour and flash pattern for each state |
 | `lib/annunciator.py` | Speaker (PWM on GP18) and button (GP20): the alarm sounds, played in the background, and press / hold detection |
 | `lib/co2events.py` | Event detection and timing (room level, peak, 10-90 % rise, 90-10 % fall) |
 | `lib/mhz19c.py` | Driver for the Winsen MH-Z19C CO2 sensor; works with the two data wires either way round |
 
-Laptop tests (`python -m pytest tests/`, 44 tests): `tests/test_cr1.py` and `tests/test_alarm.py`
-replay the real 22 Oct readings (present by breath 3, absent and CRITICAL 17 s after the last
-breath of the rhythmic run; both sensor faults TECHNICAL, never CRITICAL), and
-`tests/test_co2events.py` dry-runs `code.py` with a simulated sensor, light ring, speaker and button.
+Laptop tests for the firmware (88, with `tests/test_cr4.py`, `tests/test_lineclip.py` and
+`tests/test_rate_run.py` added on 1 Nov; earlier note: 49 of the 68 in `python -m pytest tests/`): `tests/test_cr1.py` and
+`tests/test_alarm.py` replay the real 22 Oct readings (present by breath 3, absent and CRITICAL 17 s
+after the last breath of the rhythmic run; both sensor faults TECHNICAL, never CRITICAL), and
+`tests/test_co2events.py` dry-runs `code.py` with a simulated sensor, light ring, speaker, button
+and USB link (the JSON line for every reading; `ACK` from the dashboard acknowledges like the button).
 
 ## What the board shows
 
@@ -31,9 +53,9 @@ breath of the rhythmic run; both sensor faults TECHNICAL, never CRITICAL), and
 | --- | --- | --- | --- |
 | STANDBY | Warming up, or no breath seen yet: not monitoring | One white light circling | None |
 | NORMAL | Exhaled CO2 present | Green, steady | None |
-| ADVISORY | A sustained fall in CO2 (CR-4). **Not triggered yet** | Amber, slow flash | 3 pulses, every 20 s |
-| CRITICAL | CO2 lost after it was present. Latched: stays until the button, even if CO2 comes back | Red, fast flash (steady once acknowledged) | 10 pulses (3+2+3+2), every 10 s |
-| TECHNICAL | Any sensor problem, and the 3-minute re-warm after it | Cyan, steady | Chirp, every 30 s |
+| ADVISORY | A sustained fall of the breathing rate or of the CO2 (CR-4), for 30 s; back to NORMAL after 30 s in range | Amber, slow flash | 3 pulses, every 20 s |
+| CRITICAL | CO2 lost after it was present. Latched: ends once it is acknowledged and CO2 is back, in either order | Red, fast flash (steady once acknowledged). While CO2 is back but nobody has pressed yet: red and green in turn, 1 s each | 10 pulses (3+2+3+2), every 10 s |
+| TECHNICAL | Any sensor problem, and the 3-minute re-warm after it; the sampling line off (safety clip open); a reading stuck at the top of the scale for 30 s | Cyan, steady | Chirp, every 30 s |
 
 At power-up: green, amber, red, cyan for 0.4 s each (lamp test), then a rising two-tone chirp
 (speaker test). The sounds follow the pattern of medical alarms (IEC 60601-1-8): 10 pulses for high
@@ -41,8 +63,10 @@ priority, 3 for medium, and the light flashes faster the higher the priority.
 
 **Button:** a short press acknowledges a critical alarm: sound off for 2 minutes, light steady red.
 If CO2 is back, the press clears the alarm to NORMAL; if not, the alarm sounds again after the
-2 minutes. Holding the button for 3 s stops monitoring (falling two-tone, back to STANDBY); it starts
-again at the next breath.
+2 minutes, and it clears by itself to NORMAL as soon as CO2 is back (acknowledged and back in range).
+An advisory is acknowledged the same way (sound off 2 minutes, light still amber). Holding the button for 3 s stops monitoring (falling two-tone, back to STANDBY); it starts
+again at the next breath. The dashboard's **Acknowledge** does exactly what a short press does;
+stopping monitoring is only possible at the box.
 
 **Golden rule (CR-3): an equipment problem is TECHNICAL, never CRITICAL.**
 - A sensor FAULT in CR-1 is: no answer; a reading stuck at 400 ppm (the bottom of the scale, which
@@ -80,9 +104,12 @@ the top of `code.py` (`RING_PIN`, `SPEAKER_PIN`, `BUTTON_PIN`).
 
 ## Reading results
 
-- **Live view on the Mac:** `bash tools/live_co2.sh` in Terminal, from the repository folder.
-  One line per second, also saved to `data/raw/`. Stop with Ctrl-C. Close Thonny/Mu first: only
-  one program can hold the serial port. Each line reads, for example,
+- **Dashboard on the Mac:** `bash tools/dashboard.sh` in Terminal, from the repository folder. The
+  board's state live in the browser, with sound, acknowledge, the trend and the alarm log; every
+  line is also saved to `data/raw/`. See [dashboard/README.md](../dashboard/README.md).
+- **Live view in Terminal:** `bash tools/live_co2.sh`. One line per second, also saved to
+  `data/raw/` (with the JSON lines, which it does not show). Stop with Ctrl-C. Only one program can
+  hold the serial port: close the dashboard, Thonny or Mu first. Each line reads, for example,
   `t= 312 s  CO2  1814 ppm  |##########....|  PRESENT    NORMAL`: the CR-1 state, then the alarm.
 - **Verification runs:** `bash tools/scripted_run.sh`; see `tools/README.md`.
 - **`boot_out.txt`:** after a replug, its last line reads `CO2 OK: <ppm> ppm, wires <normal|swapped>`
@@ -93,7 +120,8 @@ the top of `code.py` (`RING_PIN`, `SPEAKER_PIN`, `BUTTON_PIN`).
 
 ## Next
 
-- CR-4 (hypoventilation, the ADVISORY state), from the slow fall of the CO2 peaks.
-- The break-wire loop, so a disconnected sampling line is a TECHNICAL alarm too (CR-2 / CR-3).
-- Print one JSON line per sample for the laptop service (the format planned in the team's outline).
+- Air through the cell (pump or flushes) and a diluted sample: without them breath does not reliably
+  reach the sensor, the rate cannot be read, and a cell full of old breath reads 5,000 ppm (1 Nov).
+- A blocked line (CR-3): needs the airflow above, or a water-trap probe.
 - Read the alarm thresholds from `config.json`, the file the service uses too.
+- Possibly: a slow "breathing" cyan for TECHNICAL, the signature on workshop slide 11 (steady now).
