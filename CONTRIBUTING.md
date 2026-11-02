@@ -1,6 +1,6 @@
 # Working on this repository
 
-Six of us share this repository. A few habits keep it tidy and protect the marks.
+Six of us share this repository.
 
 ## Ground rules
 
